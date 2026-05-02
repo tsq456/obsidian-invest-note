@@ -12,6 +12,7 @@ import type { InvestmentNotesSettings } from "./types";
 
 const MARKDOWN_STOCK_LINK_REGEX =
   /\[(\$[^\]\n]+?\$)\]\(https?:\/\/xueqiu\.com\/S\/(?:SH|SZ|BJ)\d{6}[^\)]*\)/gi;
+const RENDERED_STOCK_LABEL_REGEX = /^\$\s*(.+?)\s*\$$/;
 
 export function decorateRenderedStockLinks(el: HTMLElement): void {
   el.querySelectorAll<HTMLAnchorElement>("a").forEach((anchor) => {
@@ -22,7 +23,22 @@ export function decorateRenderedStockLinks(el: HTMLElement): void {
 
     anchor.addClass("stock-note-link");
     anchor.addClass("stock-note-link-rendered");
+    spaceRenderedStockLabel(anchor);
   });
+}
+
+function spaceRenderedStockLabel(anchor: HTMLAnchorElement): void {
+  if (anchor.childNodes.length !== 1 || anchor.firstChild?.nodeType !== Node.TEXT_NODE) {
+    return;
+  }
+
+  const label = anchor.textContent ?? "";
+  const match = label.match(RENDERED_STOCK_LABEL_REGEX);
+  if (!match) {
+    return;
+  }
+
+  anchor.textContent = `$ ${match[1]} $`;
 }
 
 export function createStockLinkDecorationExtension() {

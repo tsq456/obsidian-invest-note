@@ -17,6 +17,9 @@ type QuoteSnapshot = {
   high: number | null;
   low: number | null;
   close: number | null;
+  previousClose: number | null;
+  changeAmount: number | null;
+  changePercent: number | null;
   volume: number | null;
   amount: number | null;
 };
@@ -29,6 +32,9 @@ type EastMoneyQuoteResponse = {
     f46?: number;
     f47?: number;
     f48?: number;
+    f60?: number;
+    f169?: number;
+    f170?: number;
     f86?: number;
   };
 };
@@ -94,7 +100,7 @@ export class HoverPreview {
       text: this.getDisplayTitle(symbol)
     });
 
-    const quoteEl = popover.createDiv({ cls: "stock-note-quote-row" });
+    const quoteEl = popover.createDiv({ cls: "stock-note-quote-section" });
     void this.renderQuote(symbol, quoteEl);
 
     const periodControls = popover.createDiv({ cls: "stock-note-period-tabs" });
@@ -138,13 +144,15 @@ export class HoverPreview {
       }
 
       quoteEl.empty();
-      addQuoteItem(quoteEl, "日期", quote.date);
-      addQuoteItem(quoteEl, "开盘", formatPrice(quote.open));
-      addQuoteItem(quoteEl, "最高", formatPrice(quote.high));
-      addQuoteItem(quoteEl, "最低", formatPrice(quote.low));
-      addQuoteItem(quoteEl, "收盘", formatPrice(quote.close));
-      addQuoteItem(quoteEl, "成交量", formatVolumeHands(quote.volume));
-      addQuoteItem(quoteEl, "成交额", formatAmount(quote.amount));
+      renderPriceSummary(quoteEl, quote);
+      const detailEl = quoteEl.createDiv({ cls: "stock-note-quote-row" });
+      addQuoteItem(detailEl, "日期", quote.date);
+      addQuoteItem(detailEl, "开盘", formatPrice(quote.open), getPriceChangeClass(quote.open, quote.previousClose));
+      addQuoteItem(detailEl, "最高", formatPrice(quote.high), getPriceChangeClass(quote.high, quote.previousClose));
+      addQuoteItem(detailEl, "最低", formatPrice(quote.low), getPriceChangeClass(quote.low, quote.previousClose));
+      addQuoteItem(detailEl, "收盘", formatPrice(quote.close), getPriceChangeClass(quote.close, quote.previousClose));
+      addQuoteItem(detailEl, "成交量", formatVolumeHands(quote.volume));
+      addQuoteItem(detailEl, "成交额", formatAmount(quote.amount));
     } catch (error) {
       console.warn("[investment-notes] Failed to load quote snapshot", error);
       if (symbol === this.activeSymbol) {
@@ -255,7 +263,7 @@ async function fetchQuoteSnapshot(symbol: string): Promise<QuoteSnapshot> {
   }
 
   const response = await requestUrl({
-    url: `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fields=f43,f44,f45,f46,f47,f48,f86`,
+    url: `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fields=f43,f44,f45,f46,f47,f48,f60,f86,f169,f170`,
     method: "GET",
     headers: {
       Accept: "application/json,text/plain,*/*",
@@ -274,15 +282,53 @@ async function fetchQuoteSnapshot(symbol: string): Promise<QuoteSnapshot> {
     high: toNullableNumber(data.f44),
     low: toNullableNumber(data.f45),
     close: toNullableNumber(data.f43),
+    previousClose: toNullableNumber(data.f60),
+    changeAmount: toNullableNumber(data.f169),
+    changePercent: toNullableNumber(data.f170),
     volume: toNullableNumber(data.f47),
     amount: toNullableNumber(data.f48)
   };
 }
 
-function addQuoteItem(parent: HTMLElement, label: string, value: string): void {
+function renderPriceSummary(parent: HTMLElement, quote: QuoteSnapshot): void {
+  const summary = parent.createDiv({ cls: "stock-note-price-summary" });
+  addSummaryItem(summary, "收盘价", formatPrice(quote.close), getPriceChangeClass(quote.close, quote.previousClose));
+  addSummaryItem(summary, "涨跌金额", formatSignedPrice(quote.changeAmount), getValueChangeClass(quote.changeAmount));
+  addSummaryItem(summary, "涨跌幅", formatSignedPercent(quote.changePercent), getValueChangeClass(quote.changePercent));
+}
+
+function addSummaryItem(parent: HTMLElement, label: string, value: string, valueClass?: string): void {
+  const item = parent.createDiv({ cls: "stock-note-price-summary-item" });
+  item.createDiv({ cls: "stock-note-price-summary-label", text: label });
+  const valueEl = item.createDiv({ cls: "stock-note-price-summary-value", text: value });
+  if (valueClass) {
+    valueEl.addClass(valueClass);
+  }
+}
+
+function addQuoteItem(parent: HTMLElement, label: string, value: string, valueClass?: string): void {
   const item = parent.createSpan({ cls: "stock-note-quote-item" });
   item.createSpan({ cls: "stock-note-quote-label", text: `${label}: ` });
-  item.createSpan({ cls: "stock-note-quote-value", text: value });
+  const valueEl = item.createSpan({ cls: "stock-note-quote-value", text: value });
+  if (valueClass) {
+    valueEl.addClass(valueClass);
+  }
+}
+
+function getPriceChangeClass(value: number | null, previousClose: number | null): string | undefined {
+  if (value === null || previousClose === null) {
+    return undefined;
+  }
+
+  return getValueChangeClass(value - previousClose);
+}
+
+function getValueChangeClass(value: number | null): string | undefined {
+  if (value === null || value === 0) {
+    return undefined;
+  }
+
+  return value > 0 ? "stock-note-change-up" : "stock-note-change-down";
 }
 
 function normalizeChartPeriod(period: string): ChartPeriod {
@@ -317,6 +363,22 @@ function formatDate(date: Date): string {
 
 function formatPrice(value: number | null): string {
   return value === null ? "-" : value.toFixed(2);
+}
+
+function formatSignedPrice(value: number | null): string {
+  if (value === null) {
+    return "-";
+  }
+
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
+}
+
+function formatSignedPercent(value: number | null): string {
+  if (value === null) {
+    return "-";
+  }
+
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
 function formatVolumeHands(value: number | null): string {

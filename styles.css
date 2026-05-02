@@ -56,6 +56,45 @@ body:not(.stock-note-link-pill-disabled) .markdown-source-view.mod-cm6.is-live-p
   font-weight: 600;
 }
 
+.stock-note-quote-section {
+  margin-bottom: 8px;
+}
+
+.stock-note-price-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+}
+
+.stock-note-price-summary-item {
+  min-width: 0;
+}
+
+.stock-note-price-summary-label {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.stock-note-price-summary-value {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small, 13px);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.stock-note-change-up {
+  color: #d14b3f;
+}
+
+.stock-note-change-down {
+  color: #1f8f4d;
+}
+
 .stock-note-period-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -86,7 +125,6 @@ body:not(.stock-note-link-pill-disabled) .markdown-source-view.mod-cm6.is-live-p
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px 12px;
-  margin-bottom: 8px;
   padding: 8px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
@@ -132,6 +170,10 @@ body:not(.stock-note-link-pill-disabled) .markdown-source-view.mod-cm6.is-live-p
 }
 
 @media (max-width: 520px) {
+  .stock-note-price-summary {
+    grid-template-columns: 1fr;
+  }
+
   .stock-note-quote-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
