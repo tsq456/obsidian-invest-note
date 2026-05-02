@@ -1,4 +1,5 @@
-import { requestUrl, type Plugin } from "obsidian";
+import { requestUrl } from "obsidian";
+import type InvestmentNotesPlugin from "./main";
 import { getSinaChartUrl, getXueqiuSymbolFromHref } from "./stockStore";
 import type { ChartPeriod, InvestmentNotesData } from "./types";
 
@@ -6,9 +7,9 @@ const CHART_PERIODS: Array<{ value: ChartPeriod; label: string }> = [
   { value: "min", label: "分时" },
   { value: "daily", label: "日K" },
   { value: "weekly", label: "周K" },
-  { value: "monthly", label: "月K" },
-  { value: "yearly", label: "年K" }
+  { value: "monthly", label: "月K" }
 ];
+const DEFAULT_PERIOD: ChartPeriod = "min";
 
 type QuoteSnapshot = {
   date: string;
@@ -32,28 +33,15 @@ type EastMoneyQuoteResponse = {
   };
 };
 
-type EastMoneyKlineResponse = {
-  data?: {
-    klines?: string[];
-  };
-};
-
-type KlineBar = {
-  date: string;
-  open: number;
-  close: number;
-  high: number;
-  low: number;
-};
-
 export class HoverPreview {
   private popoverEl: HTMLElement | null = null;
   private hideTimer: number | null = null;
-  private activePeriod: ChartPeriod = "min";
+  private activePeriod: ChartPeriod = DEFAULT_PERIOD;
   private activeSymbol: string | null = null;
+  private readonly quoteCache = new Map<string, QuoteSnapshot>();
 
   constructor(
-    private readonly plugin: Plugin,
+    private readonly plugin: InvestmentNotesPlugin,
     private readonly data: InvestmentNotesData
   ) {}
 
@@ -97,13 +85,20 @@ export class HoverPreview {
     this.clearHideTimer();
     this.popoverEl?.remove();
     this.activeSymbol = symbol;
-    this.activePeriod = this.data.settings.defaultChartPeriod;
+    this.activePeriod = normalizeChartPeriod(this.data.settings.defaultChartPeriod);
 
     const popover = document.body.createDiv({ cls: "stock-note-popover" });
     const header = popover.createDiv({ cls: "stock-note-popover-header" });
-    header.createSpan({ cls: "stock-note-popover-symbol", text: symbol });
+    header.createSpan({
+      cls: "stock-note-popover-symbol",
+      text: this.getDisplayTitle(symbol)
+    });
 
-    const periodControls = header.createDiv({ cls: "stock-note-period-tabs" });
+    const quoteEl = popover.createDiv({ cls: "stock-note-quote-row" });
+    void this.renderQuote(symbol, quoteEl);
+
+    const periodControls = popover.createDiv({ cls: "stock-note-period-tabs" });
+    const imageWrap = popover.createDiv({ cls: "stock-note-popover-image-wrap" });
     CHART_PERIODS.forEach((period) => {
       const button = periodControls.createEl("button", {
         cls: "stock-note-period-tab",
@@ -119,15 +114,10 @@ export class HoverPreview {
         this.activePeriod = period.value;
         periodControls.querySelectorAll(".stock-note-period-tab").forEach((el) => el.removeClass("is-active"));
         button.addClass("is-active");
-        void this.renderChart(symbol, imageWrap);
+        this.renderChart(symbol, imageWrap);
       });
     });
-
-    const quoteEl = popover.createDiv({ cls: "stock-note-quote-row" });
-    this.renderQuote(symbol, quoteEl);
-
-    const imageWrap = popover.createDiv({ cls: "stock-note-popover-image-wrap" });
-    void this.renderChart(symbol, imageWrap);
+    this.renderChart(symbol, imageWrap);
 
     popover.addEventListener("mouseenter", () => this.clearHideTimer());
     popover.addEventListener("mouseleave", () => this.scheduleHide());
@@ -142,7 +132,7 @@ export class HoverPreview {
     quoteEl.createSpan({ cls: "stock-note-quote-loading", text: "行情加载中..." });
 
     try {
-      const quote = await fetchQuoteSnapshot(symbol);
+      const quote = await this.getQuoteSnapshot(symbol);
       if (symbol !== this.activeSymbol) {
         return;
       }
@@ -164,26 +154,9 @@ export class HoverPreview {
     }
   }
 
-  private async renderChart(symbol: string, imageWrap: HTMLElement): Promise<void> {
+  private renderChart(symbol: string, imageWrap: HTMLElement): void {
     imageWrap.empty();
     const loading = imageWrap.createDiv({ cls: "stock-note-popover-loading", text: "图表加载中..." });
-
-    if (this.activePeriod === "yearly") {
-      try {
-        const bars = await fetchYearlyKlines(symbol, this.data.settings.tushareToken);
-        if (symbol !== this.activeSymbol || this.activePeriod !== "yearly") {
-          return;
-        }
-
-        imageWrap.empty();
-        imageWrap.appendChild(renderYearlyKlineSvg(bars));
-      } catch (error) {
-        console.warn("[investment-notes] Failed to load yearly kline", error);
-        loading.setText("年K暂不可用");
-      }
-      return;
-    }
-
     const chartUrl = getSinaChartUrl(symbol, this.activePeriod);
     if (!chartUrl) {
       loading.setText("图表暂不可用");
@@ -206,6 +179,23 @@ export class HoverPreview {
     img.addEventListener("error", () => {
       loading.setText("图表暂不可用");
     });
+  }
+
+  private async getQuoteSnapshot(symbol: string): Promise<QuoteSnapshot> {
+    const cached = this.quoteCache.get(symbol);
+    if (cached) {
+      return cached;
+    }
+
+    const quote = await fetchQuoteSnapshot(symbol);
+    this.quoteCache.set(symbol, quote);
+    return quote;
+  }
+
+  private getDisplayTitle(symbol: string): string {
+    const stock = this.plugin.stockStore.getBySymbol(symbol);
+    const code = toTushareDisplayCode(symbol);
+    return stock ? `${stock.name}（${code}）` : code;
   }
 
   private positionPopover(anchor: HTMLAnchorElement, popover: HTMLElement): void {
@@ -258,21 +248,6 @@ export class HoverPreview {
   }
 }
 
-function periodLabel(period: string): string {
-  switch (period) {
-    case "daily":
-      return "日 K";
-    case "weekly":
-      return "周 K";
-    case "monthly":
-      return "月 K";
-    case "yearly":
-      return "年 K";
-    default:
-      return "分时";
-  }
-}
-
 async function fetchQuoteSnapshot(symbol: string): Promise<QuoteSnapshot> {
   const secid = toEastMoneySecid(symbol);
   if (!secid) {
@@ -304,256 +279,14 @@ async function fetchQuoteSnapshot(symbol: string): Promise<QuoteSnapshot> {
   };
 }
 
-async function fetchYearlyKlines(symbol: string, tushareToken: string): Promise<KlineBar[]> {
-  const errors: string[] = [];
-
-  try {
-    return await fetchEastMoneyYearlyKlines(symbol);
-  } catch (error) {
-    errors.push(error instanceof Error ? error.message : String(error));
-  }
-
-  if (tushareToken.trim()) {
-    try {
-      return await fetchTushareYearlyKlines(symbol, tushareToken.trim());
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  throw new Error(errors.join(" | "));
-}
-
-async function fetchEastMoneyYearlyKlines(symbol: string): Promise<KlineBar[]> {
-  const secid = toEastMoneySecid(symbol);
-  if (!secid) {
-    throw new Error(`Unsupported symbol: ${symbol}`);
-  }
-
-  const hosts = ["push2his.eastmoney.com", "push2.eastmoney.com", "push2delay.eastmoney.com"];
-  const errors: string[] = [];
-
-  for (const host of hosts) {
-    try {
-      const response = await requestUrl({
-        url: `https://${host}/api/qt/stock/kline/get?secid=${secid}&ut=fa5fd1943c7b386f172d6893dbfba10b&klt=103&fqt=0&beg=19900101&end=20500101&lmt=240&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55`,
-        method: "GET",
-        headers: {
-          Accept: "application/json,text/plain,*/*",
-          Referer: "https://quote.eastmoney.com/",
-          "User-Agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Obsidian Investment Notes"
-        }
-      });
-      const klines = (response.json as EastMoneyKlineResponse).data?.klines ?? [];
-      const bars = aggregateYearlyBars(
-        klines.map((line) => {
-          const [date, open, close, high, low] = line.split(",");
-          return {
-            date,
-            open: Number(open),
-            close: Number(close),
-            high: Number(high),
-            low: Number(low)
-          };
-        })
-      );
-
-      if (bars.length > 0) {
-        return bars;
-      }
-
-      errors.push(`${host}: empty klines`);
-    } catch (error) {
-      errors.push(`${host}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  throw new Error(errors.join(" | "));
-}
-
-async function fetchTushareYearlyKlines(symbol: string, token: string): Promise<KlineBar[]> {
-  const tsCode = toTushareCode(symbol);
-  if (!tsCode) {
-    throw new Error(`Unsupported symbol: ${symbol}`);
-  }
-
-  const response = await requestUrl({
-    url: "https://api.tushare.pro",
-    method: "POST",
-    contentType: "application/json",
-    headers: {
-      Accept: "application/json,text/plain,*/*"
-    },
-    body: JSON.stringify({
-      api_name: "daily",
-      token,
-      params: {
-        ts_code: tsCode,
-        start_date: "19900101",
-        end_date: formatCompactDate(new Date())
-      },
-      fields: "trade_date,open,high,low,close"
-    })
-  });
-
-  const body = response.json as {
-    code?: number;
-    msg?: string;
-    data?: {
-      fields?: string[];
-      items?: unknown[][];
-    };
-  };
-  if (body.code !== 0) {
-    throw new Error(body.msg || `Tushare 返回错误 code=${body.code}`);
-  }
-
-  const fields = body.data?.fields ?? [];
-  const items = body.data?.items ?? [];
-  const bars = items
-    .map((item) => {
-      const record = Object.fromEntries(fields.map((field, index) => [field, item[index]]));
-      const tradeDate = typeof record.trade_date === "string" ? record.trade_date : "";
-      return {
-        date: `${tradeDate.slice(0, 4)}-${tradeDate.slice(4, 6)}-${tradeDate.slice(6, 8)}`,
-        open: Number(record.open),
-        close: Number(record.close),
-        high: Number(record.high),
-        low: Number(record.low)
-      };
-    })
-    .sort((a, b) => a.date.localeCompare(b.date));
-
-  const yearlyBars = aggregateYearlyBars(bars);
-  if (yearlyBars.length === 0) {
-    throw new Error("Tushare daily 返回了空数据");
-  }
-
-  return yearlyBars;
-}
-
-function aggregateYearlyBars(inputBars: KlineBar[]): KlineBar[] {
-  const validBars = inputBars.filter(
-    (bar) => bar.date && [bar.open, bar.close, bar.high, bar.low].every(Number.isFinite)
-  );
-  const byYear = new Map<string, KlineBar>();
-  for (const bar of validBars) {
-    const year = bar.date.slice(0, 4);
-    const existing = byYear.get(year);
-    if (!existing) {
-      byYear.set(year, { date: year, open: bar.open, close: bar.close, high: bar.high, low: bar.low });
-      continue;
-    }
-
-    existing.close = bar.close;
-    existing.high = Math.max(existing.high, bar.high);
-    existing.low = Math.min(existing.low, bar.low);
-  }
-
-  return Array.from(byYear.values()).slice(-18);
-}
-
-function renderYearlyKlineSvg(bars: KlineBar[]): SVGSVGElement {
-  const width = 540;
-  const height = 260;
-  const padding = { top: 16, right: 16, bottom: 28, left: 42 };
-  const svg = createSvgElement("svg");
-  svg.setAttribute("class", "stock-note-yearly-svg");
-  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", "年K图");
-
-  if (bars.length === 0) {
-    const text = createSvgElement("text");
-    text.setAttribute("x", String(width / 2));
-    text.setAttribute("y", String(height / 2));
-    text.setAttribute("text-anchor", "middle");
-    text.setAttribute("class", "stock-note-yearly-empty");
-    text.textContent = "年K暂无数据";
-    svg.appendChild(text);
-    return svg;
-  }
-
-  const high = Math.max(...bars.map((bar) => bar.high));
-  const low = Math.min(...bars.map((bar) => bar.low));
-  const range = high - low || 1;
-  const innerWidth = width - padding.left - padding.right;
-  const innerHeight = height - padding.top - padding.bottom;
-  const slot = innerWidth / bars.length;
-  const candleWidth = Math.max(5, Math.min(18, slot * 0.48));
-  const y = (value: number) => padding.top + ((high - value) / range) * innerHeight;
-
-  const gridTop = createSvgElement("line");
-  gridTop.setAttribute("x1", String(padding.left));
-  gridTop.setAttribute("x2", String(width - padding.right));
-  gridTop.setAttribute("y1", String(padding.top));
-  gridTop.setAttribute("y2", String(padding.top));
-  gridTop.setAttribute("class", "stock-note-yearly-grid");
-  svg.appendChild(gridTop);
-
-  const gridBottom = createSvgElement("line");
-  gridBottom.setAttribute("x1", String(padding.left));
-  gridBottom.setAttribute("x2", String(width - padding.right));
-  gridBottom.setAttribute("y1", String(height - padding.bottom));
-  gridBottom.setAttribute("y2", String(height - padding.bottom));
-  gridBottom.setAttribute("class", "stock-note-yearly-grid");
-  svg.appendChild(gridBottom);
-
-  bars.forEach((bar, index) => {
-    const x = padding.left + slot * index + slot / 2;
-    const rising = bar.close >= bar.open;
-    const cls = rising ? "is-up" : "is-down";
-
-    const wick = createSvgElement("line");
-    wick.setAttribute("x1", String(x));
-    wick.setAttribute("x2", String(x));
-    wick.setAttribute("y1", String(y(bar.high)));
-    wick.setAttribute("y2", String(y(bar.low)));
-    wick.setAttribute("class", `stock-note-yearly-wick ${cls}`);
-    svg.appendChild(wick);
-
-    const bodyTop = y(Math.max(bar.open, bar.close));
-    const bodyBottom = y(Math.min(bar.open, bar.close));
-    const body = createSvgElement("rect");
-    body.setAttribute("x", String(x - candleWidth / 2));
-    body.setAttribute("y", String(bodyTop));
-    body.setAttribute("width", String(candleWidth));
-    body.setAttribute("height", String(Math.max(2, bodyBottom - bodyTop)));
-    body.setAttribute("class", `stock-note-yearly-body ${cls}`);
-    svg.appendChild(body);
-
-    if (index === 0 || index === bars.length - 1 || index % 3 === 0) {
-      const label = createSvgElement("text");
-      label.setAttribute("x", String(x));
-      label.setAttribute("y", String(height - 8));
-      label.setAttribute("text-anchor", "middle");
-      label.setAttribute("class", "stock-note-yearly-label");
-      label.textContent = bar.date;
-      svg.appendChild(label);
-    }
-  });
-
-  const highLabel = createSvgElement("text");
-  highLabel.setAttribute("x", "4");
-  highLabel.setAttribute("y", String(padding.top + 4));
-  highLabel.setAttribute("class", "stock-note-yearly-axis");
-  highLabel.textContent = formatPrice(high);
-  svg.appendChild(highLabel);
-
-  const lowLabel = createSvgElement("text");
-  lowLabel.setAttribute("x", "4");
-  lowLabel.setAttribute("y", String(height - padding.bottom));
-  lowLabel.setAttribute("class", "stock-note-yearly-axis");
-  lowLabel.textContent = formatPrice(low);
-  svg.appendChild(lowLabel);
-
-  return svg;
-}
-
 function addQuoteItem(parent: HTMLElement, label: string, value: string): void {
   const item = parent.createSpan({ cls: "stock-note-quote-item" });
   item.createSpan({ cls: "stock-note-quote-label", text: `${label}: ` });
   item.createSpan({ cls: "stock-note-quote-value", text: value });
+}
+
+function normalizeChartPeriod(period: string): ChartPeriod {
+  return CHART_PERIODS.some((item) => item.value === period) ? (period as ChartPeriod) : DEFAULT_PERIOD;
 }
 
 function toEastMoneySecid(symbol: string): string | null {
@@ -566,13 +299,9 @@ function toEastMoneySecid(symbol: string): string | null {
   return `${marketCode}.${match[2]}`;
 }
 
-function toTushareCode(symbol: string): string | null {
+function toTushareDisplayCode(symbol: string): string {
   const match = symbol.toUpperCase().match(/^(SH|SZ|BJ)(\d{6})$/);
-  if (!match) {
-    return null;
-  }
-
-  return `${match[2]}.${match[1]}`;
+  return match ? `${match[2]}.${match[1]}` : symbol;
 }
 
 function toNullableNumber(value: unknown): number | null {
@@ -584,13 +313,6 @@ function formatDate(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-}
-
-function formatCompactDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}${month}${day}`;
 }
 
 function formatPrice(value: number | null): string {
@@ -623,8 +345,4 @@ function formatAmount(value: number | null): string {
   }
 
   return value.toFixed(0);
-}
-
-function createSvgElement<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTagNameMap[K] {
-  return document.createElementNS("http://www.w3.org/2000/svg", tag);
 }

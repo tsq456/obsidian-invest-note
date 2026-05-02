@@ -14,7 +14,8 @@ Obsidian Invest Note 是一个用于 A 股复盘笔记的 Obsidian 插件。它�
 
 - 鼠标悬浮雪球股票链接时展示新浪财经图表。
 - 悬浮图表上方展示日期、开盘、最高、最低、收盘、成交量、成交额。
-- 图表支持切换分时、日 K、周 K、月 K、年 K。
+- 行情摘要仅缓存在当前 Obsidian 会话内，重启后自动清空。
+- 图表支持切换分时、日 K、周 K、月 K。
 - 支持自定义触发关键字、悬浮图周期、股票短链颜色和样式。
 - 股票列表使用本地缓存，并支持远端刷新。
 - 配置了具备权限的 Tushare Token 时，优先使用 Tushare `stock_basic`；否则回退到东方财富。
@@ -69,7 +70,7 @@ $688256
 - `Tushare Token`：可选。填写后刷新股票列表会优先调用 Tushare `stock_basic`。
 - `自动更新股票列表`：启动后按刷新周期后台更新本地股票缓存。
 - `刷新周期`：默认 7 天。
-- `默认图表周期`：支持 `min`、`daily`、`weekly`、`monthly`、`yearly`。
+- `默认图表周期`：支持 `min`、`daily`、`weekly`、`monthly`。
 - `启用悬浮图表`：开启或关闭 hover 图表预览。
 - 股票短链样式：文本颜色、背景色、边框色、是否加粗、是否启用胶囊背景。
 
@@ -81,15 +82,11 @@ $688256
 - 兜底数据源：东方财富 `push2delay` 分页接口。
 - 离线兜底：插件内置的 `data/stocks.seed.json`。
 
-悬浮图表：
+悬浮图表使用新浪财经图片地址：
 
-- 分时、日 K、周 K、月 K 使用新浪财经图片地址：
-
-  ```text
-  https://image.sinajs.cn/newchart/{period}/n/{market}{code}.gif
-  ```
-
-- 年 K 优先尝试东方财富历史 K 线；如果配置了 Tushare Token，也可用 Tushare `daily` 日线聚合成年 K。
+```text
+https://image.sinajs.cn/newchart/{period}/n/{market}{code}.gif
+```
 
 这些都是外部数据源，插件无法承诺稳定性。远端请求失败时会继续使用本地缓存或内置种子库。
 

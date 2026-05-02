@@ -64,6 +64,11 @@ export class StockStore {
     return this.stocks;
   }
 
+  getBySymbol(symbol: string): StockInfo | null {
+    const normalized = symbol.toUpperCase();
+    return this.stocks.find((stock) => stock.symbol === normalized) ?? null;
+  }
+
   search(query: string, limit = 20): StockInfo[] {
     const normalized = normalizeSearchText(query);
     if (!normalized) {
@@ -422,10 +427,6 @@ function normalizeSearchText(value: string): string {
 }
 
 export function getSinaChartUrl(symbol: string, period: string): string | null {
-  if (period === "yearly") {
-    return null;
-  }
-
   const match = symbol.toUpperCase().match(/^(SH|SZ|BJ)(\d{6})$/);
   if (!match) {
     return null;
