@@ -291,18 +291,25 @@ async function fetchQuoteSnapshot(symbol: string): Promise<QuoteSnapshot> {
 }
 
 function renderPriceSummary(parent: HTMLElement, quote: QuoteSnapshot): void {
+  const changeClass = getValueChangeClass(quote.changeAmount);
   const summary = parent.createDiv({ cls: "stock-note-price-summary" });
-  addSummaryItem(summary, "收盘价", formatPrice(quote.close), getPriceChangeClass(quote.close, quote.previousClose));
-  addSummaryItem(summary, "涨跌金额", formatSignedPrice(quote.changeAmount), getValueChangeClass(quote.changeAmount));
-  addSummaryItem(summary, "涨跌幅", formatSignedPercent(quote.changePercent), getValueChangeClass(quote.changePercent));
-}
+  const priceEl = summary.createSpan({
+    cls: "stock-note-price-current",
+    text: formatCurrencyPrice(quote.close)
+  });
+  const changeAmountEl = summary.createSpan({
+    cls: "stock-note-price-change",
+    text: formatSignedPrice(quote.changeAmount)
+  });
+  const changePercentEl = summary.createSpan({
+    cls: "stock-note-price-change",
+    text: formatSignedPercent(quote.changePercent)
+  });
 
-function addSummaryItem(parent: HTMLElement, label: string, value: string, valueClass?: string): void {
-  const item = parent.createDiv({ cls: "stock-note-price-summary-item" });
-  item.createDiv({ cls: "stock-note-price-summary-label", text: label });
-  const valueEl = item.createDiv({ cls: "stock-note-price-summary-value", text: value });
-  if (valueClass) {
-    valueEl.addClass(valueClass);
+  if (changeClass) {
+    priceEl.addClass(changeClass);
+    changeAmountEl.addClass(changeClass);
+    changePercentEl.addClass(changeClass);
   }
 }
 
@@ -363,6 +370,10 @@ function formatDate(date: Date): string {
 
 function formatPrice(value: number | null): string {
   return value === null ? "-" : value.toFixed(2);
+}
+
+function formatCurrencyPrice(value: number | null): string {
+  return value === null ? "-" : `￥${value.toFixed(2)}`;
 }
 
 function formatSignedPrice(value: number | null): string {
