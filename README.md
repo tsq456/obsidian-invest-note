@@ -20,6 +20,33 @@ Obsidian Invest Note 是一个用于 A 股复盘笔记的 Obsidian 插件。它�
 - 股票列表使用本地缓存，并支持远端刷新。
 - 配置了具备权限的 Tushare Token 时，优先使用 Tushare `stock_basic`；否则回退到东方财富。
 
+## BRAT 安装
+
+可以通过 BRAT 添加本仓库：
+
+```text
+https://github.com/tsq456/obsidian-invest-note
+```
+
+本仓库配置了 GitHub Actions。推送 `v*` 版本标签时会自动构建插件并创建 GitHub Release，Release 会包含 BRAT 需要的：
+
+```text
+manifest.json
+main.js
+styles.css
+```
+
+同时会附带 `investment-notes.zip`，便于手动下载安装完整插件文件。
+
+发新版前确认 `manifest.json` 和 `package.json` 的 `version` 一致，然后打标签并推送：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+标签版本需要和 `manifest.json` 版本一致，例如 `v0.1.0` 对应 `"version": "0.1.0"`。
+
 ## 手动安装
 
 1. 构建插件：
@@ -41,7 +68,6 @@ Obsidian Invest Note 是一个用于 A 股复盘笔记的 Obsidian 插件。它�
    manifest.json
    main.js
    styles.css
-   data/stocks.seed.json
    ```
 
 4. 在 Obsidian 的“第三方插件”中启用 `Investment Notes`。

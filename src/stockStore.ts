@@ -1,5 +1,6 @@
 import { Notice, Plugin, requestUrl } from "obsidian";
 import { pinyin } from "pinyin-pro";
+import seedStocks from "../data/stocks.seed.json";
 import type { InvestmentNotesData, StockCache, StockInfo, StockMarket } from "./types";
 
 const EASTMONEY_BASE_QUERY =
@@ -15,6 +16,7 @@ const EASTMONEY_MARKET_FILTERS = [
 ];
 const TUSHARE_API_URL = "https://api.tushare.pro";
 const EASTMONEY_PAGE_SIZE = 100;
+const EMBEDDED_SEED_STOCKS = seedStocks as StockInfo[];
 
 type EastMoneyDiffItem = {
   f12?: string;
@@ -131,15 +133,15 @@ export class StockStore {
   private async loadSeedStocks(): Promise<StockInfo[]> {
     const dir = this.plugin.manifest.dir;
     if (!dir) {
-      return [];
+      return EMBEDDED_SEED_STOCKS;
     }
 
     try {
       const raw = await this.plugin.app.vault.adapter.read(`${dir}/data/stocks.seed.json`);
       return JSON.parse(raw) as StockInfo[];
     } catch (error) {
-      console.error("[investment-notes] Failed to load seed stock list", error);
-      return [];
+      console.warn("[investment-notes] Failed to load seed stock list from plugin data folder; using bundled seed.", error);
+      return EMBEDDED_SEED_STOCKS;
     }
   }
 
