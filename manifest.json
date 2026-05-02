@@ -1,0 +1,10 @@
+{
+  "id": "investment-notes",
+  "name": "Investment Notes",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "A-share search, Xueqiu links, and Sina chart hover previews for investment notes.",
+  "author": "",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}

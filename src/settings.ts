@@ -1,0 +1,176 @@
+import { Notice, PluginSettingTab, Setting } from "obsidian";
+import type InvestmentNotesPlugin from "./main";
+import type { ChartPeriod } from "./types";
+
+const PERIOD_OPTIONS: Record<ChartPeriod, string> = {
+  min: "分时",
+  daily: "日 K",
+  weekly: "周 K",
+  monthly: "月 K"
+};
+
+export class InvestmentNotesSettingTab extends PluginSettingTab {
+  constructor(private readonly plugin: InvestmentNotesPlugin) {
+    super(plugin.app, plugin);
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    containerEl.createEl("h2", { text: "Investment Notes" });
+
+    new Setting(containerEl)
+      .setName("触发关键字")
+      .setDesc("用于触发股票搜索的固定字符串，例如 $、@、$$ 或 stock:。")
+      .addText((text) =>
+        text
+          .setPlaceholder("$")
+          .setValue(this.plugin.data.settings.triggerKeyword)
+          .onChange(async (value) => {
+            const normalized = value.trim();
+            if (!normalized) {
+              new Notice("触发关键字不能为空");
+              return;
+            }
+
+            this.plugin.data.settings.triggerKeyword = normalized;
+            await this.plugin.savePluginData();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("启用悬浮图表")
+      .setDesc("鼠标移入雪球股票链接时展示新浪财经图表。")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.data.settings.enableHoverPreview)
+          .onChange(async (value) => {
+            this.plugin.data.settings.enableHoverPreview = value;
+            await this.plugin.savePluginData();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("默认图表周期")
+      .setDesc("悬浮预览默认展示的新浪财经图片周期。")
+      .addDropdown((dropdown) => {
+        Object.entries(PERIOD_OPTIONS).forEach(([value, label]) => dropdown.addOption(value, label));
+        dropdown
+          .setValue(this.plugin.data.settings.defaultChartPeriod)
+          .onChange(async (value) => {
+            this.plugin.data.settings.defaultChartPeriod = value as ChartPeriod;
+            await this.plugin.savePluginData();
+          });
+      });
+
+    containerEl.createEl("h3", { text: "股票列表" });
+
+    new Setting(containerEl)
+      .setName("Tushare Token")
+      .setDesc("可选。填写后刷新股票列表会优先使用 Tushare stock_basic；留空则使用东方财富免配置接口。")
+      .addText((text) =>
+        text
+          .setPlaceholder("留空使用东方财富")
+          .setValue(this.plugin.data.settings.tushareToken)
+          .onChange(async (value) => {
+            this.plugin.data.settings.tushareToken = value.trim();
+            await this.plugin.savePluginData();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("自动更新股票列表")
+      .setDesc("启动时按刷新周期后台检查股票列表。配置 Tushare Token 后优先使用 Tushare。")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.data.settings.autoUpdateStockList)
+          .onChange(async (value) => {
+            this.plugin.data.settings.autoUpdateStockList = value;
+            await this.plugin.savePluginData();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("刷新周期")
+      .setDesc("单位：天。默认 7 天。")
+      .addText((text) =>
+        text
+          .setPlaceholder("7")
+          .setValue(String(this.plugin.data.settings.stockListTtlDays))
+          .onChange(async (value) => {
+            const ttl = Number.parseInt(value, 10);
+            if (!Number.isFinite(ttl) || ttl < 1) {
+              return;
+            }
+
+            this.plugin.data.settings.stockListTtlDays = ttl;
+            await this.plugin.savePluginData();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("手动刷新")
+      .setDesc(`上次刷新：${this.plugin.stockStore.getLastUpdatedText()}`)
+      .addButton((button) =>
+        button
+          .setButtonText("立即刷新股票列表")
+          .setCta()
+          .onClick(async () => {
+            button.setDisabled(true).setButtonText("刷新中...");
+            await this.plugin.stockStore.refreshFromRemote(true);
+            this.display();
+          })
+      );
+
+    containerEl.createEl("h3", { text: "股票短链样式" });
+
+    this.addColorSetting("文本颜色", "linkTextColor");
+    this.addColorSetting("背景色", "linkBackgroundColor");
+    this.addColorSetting("边框色", "linkBorderColor");
+
+    new Setting(containerEl)
+      .setName("加粗")
+      .setDesc("让股票短链文本加粗。")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.data.settings.linkBold)
+          .onChange(async (value) => {
+            this.plugin.data.settings.linkBold = value;
+            this.plugin.applyStyleSettings();
+            await this.plugin.savePluginData();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("胶囊背景")
+      .setDesc("启用背景、边框、圆角和内边距。关闭后仅保留文本颜色和可选加粗。")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.data.settings.linkPillStyle)
+          .onChange(async (value) => {
+            this.plugin.data.settings.linkPillStyle = value;
+            this.plugin.applyStyleSettings();
+            await this.plugin.savePluginData();
+          })
+      );
+  }
+
+  private addColorSetting(
+    name: string,
+    key: "linkTextColor" | "linkBackgroundColor" | "linkBorderColor"
+  ): void {
+    new Setting(this.containerEl)
+      .setName(name)
+      .setDesc("支持 CSS 颜色值，例如 #d14b3f 或 rgba(209, 75, 63, 0.08)。")
+      .addText((text) =>
+        text
+          .setValue(this.plugin.data.settings[key])
+          .onChange(async (value) => {
+            this.plugin.data.settings[key] = value.trim();
+            this.plugin.applyStyleSettings();
+            await this.plugin.savePluginData();
+          })
+      );
+  }
+}

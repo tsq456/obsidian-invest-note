@@ -1,0 +1,30 @@
+{
+  "name": "obsidian-investment-notes",
+  "version": "0.1.0",
+  "description": "A-share investment note links, search, and chart hover previews for Obsidian.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+  },
+  "keywords": [
+    "obsidian",
+    "plugin",
+    "stocks",
+    "investment-notes"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "pinyin-pro": "^3.27.0"
+  },
+  "devDependencies": {
+    "@codemirror/state": "6.5.0",
+    "@codemirror/view": "6.38.6",
+    "@types/node": "^22.15.3",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.25.3",
+    "obsidian": "^1.8.7",
+    "typescript": "^5.8.3"
+  }
+}
