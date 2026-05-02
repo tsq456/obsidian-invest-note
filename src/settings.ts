@@ -6,7 +6,8 @@ const PERIOD_OPTIONS: Record<ChartPeriod, string> = {
   min: "分时",
   daily: "日 K",
   weekly: "周 K",
-  monthly: "月 K"
+  monthly: "月 K",
+  yearly: "年 K"
 };
 
 export class InvestmentNotesSettingTab extends PluginSettingTab {

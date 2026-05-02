@@ -16,6 +16,8 @@
   2. Tushare 未配置或失败时，调用东方财富 `push2delay` 分页接口。
   3. 远端都失败时，继续使用本地缓存或内置种子库。
 - 悬浮图表使用新浪财经图片 URL，不解析行情数据，也不自绘图表。
+- 悬浮图表上方的行情摘要只展示日期、开盘、最高、最低、收盘、成交量、成交额。
+- 分时/日 K/周 K/月 K 使用新浪图片；年 K 使用东方财富历史 K，失败后在有 token 时用 Tushare `daily` 聚合。
 - 阅读模式链接通过 Markdown post processor 加样式。
 - 实时预览样式通过 CodeMirror decoration 实现。
 - 源码模式目前尽量保持 Markdown 原文默认显示；源码模式 hover 尚未实现。
@@ -59,4 +61,3 @@ data/stocks.seed.json
 - 支持源码模式 hover：在 CodeMirror decoration 上写入 `data-stock-symbol`，并让 `hoverPreview.ts` 识别 `.stock-note-link-cm[data-stock-symbol]`。
 - 增加股票标准化和搜索评分的小型测试。
 - 扩充 `data/stocks.seed.json`，或从一次稳定的远端快照生成种子库。
-

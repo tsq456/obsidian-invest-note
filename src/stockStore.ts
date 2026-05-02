@@ -422,6 +422,10 @@ function normalizeSearchText(value: string): string {
 }
 
 export function getSinaChartUrl(symbol: string, period: string): string | null {
+  if (period === "yearly") {
+    return null;
+  }
+
   const match = symbol.toUpperCase().match(/^(SH|SZ|BJ)(\d{6})$/);
   if (!match) {
     return null;

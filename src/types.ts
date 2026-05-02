@@ -1,5 +1,5 @@
 export type StockMarket = "SH" | "SZ" | "BJ";
-export type ChartPeriod = "min" | "daily" | "weekly" | "monthly";
+export type ChartPeriod = "min" | "daily" | "weekly" | "monthly" | "yearly";
 
 export type StockInfo = {
   code: string;
