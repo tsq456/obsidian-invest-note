@@ -1,6 +1,6 @@
 {
   "name": "obsidian-investment-notes",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A-share investment note links, search, and chart hover previews for Obsidian.",
   "main": "main.js",
   "scripts": {

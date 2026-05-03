@@ -1,4 +1,5 @@
-import { requestUrl } from "obsidian";
+import { Notice, requestUrl } from "obsidian";
+import { copyChartSnapshotToClipboard } from "./chartSnapshot";
 import type InvestmentNotesPlugin from "./main";
 import { getSinaChartUrl, getXueqiuSymbolFromHref } from "./stockStore";
 import type { ChartPeriod, InvestmentNotesData } from "./types";
@@ -125,12 +126,45 @@ export class HoverPreview {
     });
     this.renderChart(symbol, imageWrap);
 
+    const actions = popover.createDiv({ cls: "stock-note-popover-actions" });
+    const snapshotButton = actions.createEl("button", {
+      cls: "stock-note-action-button",
+      text: "复制快照",
+      attr: {
+        type: "button"
+      }
+    });
+    snapshotButton.addEventListener("click", () => {
+      void this.copyCurrentChartSnapshot(symbol, snapshotButton);
+    });
+
     popover.addEventListener("mouseenter", () => this.clearHideTimer());
     popover.addEventListener("mouseleave", () => this.scheduleHide());
 
     document.body.appendChild(popover);
     this.positionPopover(anchor, popover);
     this.popoverEl = popover;
+  }
+
+  private async copyCurrentChartSnapshot(symbol: string, button: HTMLButtonElement): Promise<void> {
+    const originalText = button.textContent ?? "复制快照";
+    button.disabled = true;
+    button.setText("复制中...");
+
+    try {
+      await copyChartSnapshotToClipboard({
+        symbol,
+        period: this.activePeriod
+      });
+      new Notice("走势图快照已复制，可在笔记中粘贴");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "走势图快照复制失败";
+      console.warn("[investment-notes] Failed to copy chart snapshot", error);
+      new Notice(message || "走势图快照复制失败");
+    } finally {
+      button.disabled = false;
+      button.setText(originalText);
+    }
   }
 
   private async renderQuote(symbol: string, quoteEl: HTMLElement): Promise<void> {

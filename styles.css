@@ -20,7 +20,6 @@ a.stock-note-link,
   font-weight: var(--stock-note-link-font-weight, inherit);
 }
 
-body:not(.stock-note-link-pill-disabled) a.stock-note-link,
 body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   background: var(--stock-note-link-bg, rgba(209, 75, 63, 0.08));
   border: 1px solid var(--stock-note-link-border, rgba(209, 75, 63, 0.24));
@@ -159,6 +158,35 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   height: auto;
   max-height: 430px;
   object-fit: contain;
+}
+
+.stock-note-popover-actions {
+  display: flex;
+  justify-content: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.stock-note-action-button {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  line-height: 24px;
+  cursor: pointer;
+}
+
+.stock-note-action-button:hover {
+  border-color: var(--interactive-accent);
+  color: var(--interactive-accent);
+}
+
+.stock-note-action-button:disabled {
+  cursor: default;
+  opacity: 0.65;
 }
 
 .stock-note-popover-loading {
