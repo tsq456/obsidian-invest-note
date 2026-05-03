@@ -1,5 +1,14 @@
-import { Notice, requestUrl } from "obsidian";
-import { copyChartSnapshotToClipboard } from "./chartSnapshot";
+import { Menu, Notice, requestUrl } from "obsidian";
+import {
+  ANNOTATION_COLORS,
+  ChartAnnotationController,
+  DEFAULT_ANNOTATION_COLOR,
+  DEFAULT_TEXT_FONT_SIZE,
+  MAX_TEXT_FONT_SIZE,
+  MIN_TEXT_FONT_SIZE,
+  type AnnotationTool
+} from "./chartAnnotation";
+import { copyChartSnapshotToClipboard, insertChartSnapshotBelowStockParagraph } from "./chartSnapshot";
 import type InvestmentNotesPlugin from "./main";
 import { getSinaChartUrl, getXueqiuSymbolFromHref } from "./stockStore";
 import type { ChartPeriod, InvestmentNotesData } from "./types";
@@ -11,6 +20,7 @@ const CHART_PERIODS: Array<{ value: ChartPeriod; label: string }> = [
   { value: "monthly", label: "月K" }
 ];
 const DEFAULT_PERIOD: ChartPeriod = "min";
+const TEXT_FONT_STEP = 2;
 
 type QuoteSnapshot = {
   date: string;
@@ -44,6 +54,7 @@ type StockHoverTarget = {
   element: HTMLElement;
   symbol: string;
   sourceMode: boolean;
+  lineHint: number | null;
 };
 
 export class HoverPreview {
@@ -51,6 +62,12 @@ export class HoverPreview {
   private hideTimer: number | null = null;
   private activePeriod: ChartPeriod = DEFAULT_PERIOD;
   private activeSymbol: string | null = null;
+  private annotationController: ChartAnnotationController | null = null;
+  private annotationTool: AnnotationTool = "arrow";
+  private annotationColor = DEFAULT_ANNOTATION_COLOR;
+  private annotationFontSize = DEFAULT_TEXT_FONT_SIZE;
+  private activeLineHint: number | null = null;
+  private activeKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
   private readonly quoteCache = new Map<string, QuoteSnapshot>();
 
   constructor(
@@ -73,7 +90,7 @@ export class HoverPreview {
         return;
       }
 
-      this.show(target.element, target.symbol);
+      this.show(target.element, target.symbol, target.lineHint);
     });
 
     this.plugin.registerDomEvent(document, "mouseout", (event) => {
@@ -96,11 +113,15 @@ export class HoverPreview {
     });
   }
 
-  private show(targetEl: HTMLElement, symbol: string): void {
+  private show(targetEl: HTMLElement, symbol: string, lineHint: number | null): void {
     this.clearHideTimer();
-    this.popoverEl?.remove();
+    this.removePopover();
     this.activeSymbol = symbol;
     this.activePeriod = normalizeChartPeriod(this.data.settings.defaultChartPeriod);
+    this.annotationTool = "arrow";
+    this.annotationColor = DEFAULT_ANNOTATION_COLOR;
+    this.annotationFontSize = DEFAULT_TEXT_FONT_SIZE;
+    this.activeLineHint = lineHint;
 
     const popover = document.body.createDiv({ cls: "stock-note-popover" });
     const header = popover.createDiv({ cls: "stock-note-popover-header" });
@@ -114,6 +135,7 @@ export class HoverPreview {
 
     const periodControls = popover.createDiv({ cls: "stock-note-period-tabs" });
     const imageWrap = popover.createDiv({ cls: "stock-note-popover-image-wrap" });
+    const actions = popover.createDiv({ cls: "stock-note-popover-actions" });
     CHART_PERIODS.forEach((period) => {
       const button = periodControls.createEl("button", {
         cls: "stock-note-period-tab",
@@ -132,22 +154,27 @@ export class HoverPreview {
         this.renderChart(symbol, imageWrap);
       });
     });
-    this.renderChart(symbol, imageWrap);
 
-    const actions = popover.createDiv({ cls: "stock-note-popover-actions" });
-    const snapshotButton = actions.createEl("button", {
-      cls: "stock-note-action-button",
-      text: "复制快照",
-      attr: {
-        type: "button"
-      }
-    });
-    snapshotButton.addEventListener("click", () => {
-      void this.copyCurrentChartSnapshot(symbol, snapshotButton);
-    });
+    this.renderSnapshotControls(actions, symbol);
+    this.renderAnnotationControls(actions);
+    this.renderChart(symbol, imageWrap);
 
     popover.addEventListener("mouseenter", () => this.clearHideTimer());
     popover.addEventListener("mouseleave", () => this.scheduleHide());
+    this.activeKeydownHandler = (event) => {
+      if (event.key === "Escape" && this.annotationController?.handleEscape()) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !isEditableTarget(event.target)) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.annotationController?.undo();
+      }
+    };
+    document.addEventListener("keydown", this.activeKeydownHandler, true);
 
     document.body.appendChild(popover);
     this.positionPopover(targetEl, popover);
@@ -155,14 +182,14 @@ export class HoverPreview {
   }
 
   private async copyCurrentChartSnapshot(symbol: string, button: HTMLButtonElement): Promise<void> {
-    const originalText = button.textContent ?? "复制快照";
     button.disabled = true;
-    button.setText("复制中...");
+    setButtonIcon(button, "copy", "复制中...", true);
 
     try {
       await copyChartSnapshotToClipboard({
         symbol,
-        period: this.activePeriod
+        period: this.activePeriod,
+        annotationSnapshot: this.annotationController?.getSnapshot() ?? null
       });
       new Notice("走势图快照已复制，可在笔记中粘贴");
     } catch (error) {
@@ -171,7 +198,24 @@ export class HoverPreview {
       new Notice(message || "走势图快照复制失败");
     } finally {
       button.disabled = false;
-      button.setText(originalText);
+      setButtonIcon(button, "copy", "复制快照", true);
+    }
+  }
+
+  private async insertCurrentChartSnapshot(symbol: string): Promise<void> {
+    try {
+      const imagePath = await insertChartSnapshotBelowStockParagraph({
+        app: this.plugin.app,
+        symbol,
+        period: this.activePeriod,
+        annotationSnapshot: this.annotationController?.getSnapshot() ?? null,
+        lineHint: this.activeLineHint
+      });
+      new Notice(`走势图图片已插入：${imagePath}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "走势图图片插入失败";
+      console.warn("[investment-notes] Failed to insert chart snapshot", error);
+      new Notice(message || "走势图图片插入失败");
     }
   }
 
@@ -205,14 +249,18 @@ export class HoverPreview {
   }
 
   private renderChart(symbol: string, imageWrap: HTMLElement): void {
+    this.annotationController?.destroy();
+    this.annotationController = null;
     imageWrap.empty();
     const loading = imageWrap.createDiv({ cls: "stock-note-popover-loading", text: "图表加载中..." });
+    const period = this.activePeriod;
     const chartUrl = getSinaChartUrl(symbol, this.activePeriod);
     if (!chartUrl) {
       loading.setText("图表暂不可用");
       return;
     }
 
+    const chartFrame = imageWrap.createDiv({ cls: "stock-note-chart-frame" });
     const img = imageWrap.createEl("img", {
       cls: "stock-note-popover-image",
       attr: {
@@ -220,15 +268,161 @@ export class HoverPreview {
         alt: `${symbol} 图表`
       }
     });
+    chartFrame.appendChild(img);
+    const annotationCanvas = chartFrame.createEl("canvas", {
+      cls: "stock-note-annotation-canvas"
+    });
     img.hide();
+    annotationCanvas.hide();
 
     img.addEventListener("load", () => {
+      if (symbol !== this.activeSymbol || period !== this.activePeriod || !imageWrap.contains(chartFrame)) {
+        return;
+      }
+
       loading.hide();
       img.show();
+      annotationCanvas.show();
+      this.annotationController = new ChartAnnotationController(annotationCanvas, img);
+      this.annotationController.setTool(this.annotationTool);
+      this.annotationController.setColor(this.annotationColor);
+      this.annotationController.setFontSize(this.annotationFontSize);
     });
     img.addEventListener("error", () => {
       loading.setText("图表暂不可用");
     });
+  }
+
+  private renderSnapshotControls(actions: HTMLElement, symbol: string): void {
+    const group = actions.createDiv({ cls: "stock-note-snapshot-controls" });
+    const snapshotButton = group.createEl("button", {
+      cls: "stock-note-action-button stock-note-copy-button",
+      attr: {
+        type: "button"
+      }
+    });
+    setButtonIcon(snapshotButton, "copy", "复制快照", true);
+    snapshotButton.addEventListener("click", () => {
+      void this.copyCurrentChartSnapshot(symbol, snapshotButton);
+    });
+
+    const menuButton = group.createEl("button", {
+      cls: "stock-note-action-button stock-note-icon-button stock-note-menu-button",
+      attr: {
+        type: "button"
+      }
+    });
+    setButtonIcon(menuButton, "chevron-down", "更多操作");
+    menuButton.addEventListener("click", (event) => {
+      const menu = new Menu();
+      menu.addItem((item) =>
+        item
+          .setTitle("插入图片")
+          .setIcon("image-plus")
+          .onClick(() => {
+            void this.insertCurrentChartSnapshot(symbol);
+          })
+      );
+      menu.showAtMouseEvent(event);
+    });
+  }
+
+  private renderAnnotationControls(actions: HTMLElement): void {
+    const toolButtons = new Map<AnnotationTool, HTMLButtonElement>();
+    const colorButtons = new Map<string, HTMLButtonElement>();
+    let fontSizeLabel: HTMLElement;
+
+    const setTool = (tool: AnnotationTool) => {
+      this.annotationTool = tool;
+      this.annotationController?.setTool(tool);
+      toolButtons.forEach((button, value) => button.toggleClass("is-active", value === tool));
+    };
+    const setColor = (color: string) => {
+      this.annotationColor = color;
+      this.annotationController?.setColor(color);
+      colorButtons.forEach((button, value) => button.toggleClass("is-active", value === color));
+    };
+    const setFontSize = (fontSize: number) => {
+      this.annotationFontSize = Math.min(MAX_TEXT_FONT_SIZE, Math.max(MIN_TEXT_FONT_SIZE, fontSize));
+      this.annotationController?.setFontSize(this.annotationFontSize);
+      fontSizeLabel.setText(`${this.annotationFontSize}`);
+    };
+
+    const toolSpecs: Array<{ tool: AnnotationTool; icon: StockNoteIcon; label: string }> = [
+      { tool: "arrow" as const, icon: "arrow-up-right", label: "箭头" },
+      { tool: "line" as const, icon: "minus", label: "直线" },
+      { tool: "rect" as const, icon: "square", label: "矩形" },
+      { tool: "polyline" as const, icon: "polyline", label: "折线" },
+      { tool: "text" as const, icon: "type", label: "文字" }
+    ];
+
+    toolSpecs.forEach(({ tool, icon, label }) => {
+      const button = actions.createEl("button", {
+        cls: "stock-note-action-button stock-note-icon-button",
+        attr: {
+          type: "button"
+        }
+      });
+      setButtonIcon(button, icon, label);
+      button.addEventListener("click", () => setTool(tool));
+      toolButtons.set(tool, button);
+    });
+
+    const undoButton = actions.createEl("button", {
+      cls: "stock-note-action-button stock-note-icon-button",
+      attr: {
+        type: "button"
+      }
+    });
+    setButtonIcon(undoButton, "undo", "撤销");
+    undoButton.addEventListener("click", () => this.annotationController?.undo());
+
+    const clearButton = actions.createEl("button", {
+      cls: "stock-note-action-button stock-note-icon-button",
+      attr: {
+        type: "button"
+      }
+    });
+    setButtonIcon(clearButton, "trash", "清空");
+    clearButton.addEventListener("click", () => this.annotationController?.clear());
+
+    const colorGroup = actions.createDiv({ cls: "stock-note-color-tools" });
+    ANNOTATION_COLORS.forEach((color) => {
+      const button = colorGroup.createEl("button", {
+        cls: "stock-note-color-button",
+        attr: {
+          type: "button",
+          title: color.label,
+          "aria-label": color.label
+        }
+      });
+      button.style.setProperty("--stock-note-annotation-color", color.value);
+      button.addEventListener("click", () => setColor(color.value));
+      colorButtons.set(color.value, button);
+    });
+
+    const fontGroup = actions.createDiv({ cls: "stock-note-font-tools" });
+    const decreaseButton = fontGroup.createEl("button", {
+      cls: "stock-note-action-button stock-note-icon-button",
+      attr: {
+        type: "button"
+      }
+    });
+    setButtonIcon(decreaseButton, "text-smaller", "减小字号");
+    decreaseButton.addEventListener("click", () => setFontSize(this.annotationFontSize - TEXT_FONT_STEP));
+    fontSizeLabel = fontGroup.createSpan({ cls: "stock-note-font-size-value", text: `${this.annotationFontSize}` });
+    const increaseButton = fontGroup.createEl("button", {
+      cls: "stock-note-action-button stock-note-icon-button",
+      attr: {
+        type: "button"
+      }
+    });
+    setButtonIcon(increaseButton, "text-bigger", "增大字号");
+    increaseButton.addEventListener("click", () => setFontSize(this.annotationFontSize + TEXT_FONT_STEP));
+
+    setTool(this.annotationTool);
+    setColor(this.annotationColor);
+    setFontSize(this.annotationFontSize);
   }
 
   private async getQuoteSnapshot(symbol: string): Promise<QuoteSnapshot> {
@@ -279,7 +473,8 @@ export class HoverPreview {
       return {
         element: sourceTarget,
         symbol: sourceSymbol.toUpperCase(),
-        sourceMode: true
+        sourceMode: true,
+        lineHint: getLineHint(sourceTarget)
       };
     }
 
@@ -290,14 +485,13 @@ export class HoverPreview {
 
     const href = anchor.getAttribute("href") ?? "";
     const symbol = getXueqiuSymbolFromHref(href);
-    return symbol ? { element: anchor, symbol, sourceMode: false } : null;
+    return symbol ? { element: anchor, symbol, sourceMode: false, lineHint: getLineHint(anchor) } : null;
   }
 
   private scheduleHide(): void {
     this.clearHideTimer();
     this.hideTimer = window.setTimeout(() => {
-      this.popoverEl?.remove();
-      this.popoverEl = null;
+      this.removePopover();
     }, 120);
   }
 
@@ -307,6 +501,82 @@ export class HoverPreview {
       this.hideTimer = null;
     }
   }
+
+  private removePopover(): void {
+    if (this.activeKeydownHandler) {
+      document.removeEventListener("keydown", this.activeKeydownHandler, true);
+      this.activeKeydownHandler = null;
+    }
+    this.annotationController?.destroy();
+    this.annotationController = null;
+    this.popoverEl?.remove();
+    this.popoverEl = null;
+  }
+}
+
+type StockNoteIcon =
+  | "arrow-up-right"
+  | "chevron-down"
+  | "check"
+  | "copy"
+  | "minus"
+  | "polyline"
+  | "square"
+  | "text-bigger"
+  | "text-smaller"
+  | "trash"
+  | "type"
+  | "undo";
+
+const ICON_PATHS: Record<StockNoteIcon, string> = {
+  "arrow-up-right": '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>',
+  "chevron-down": '<path d="m6 9 6 6 6-6"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  copy:
+    '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  minus: '<path d="M5 12h14"/>',
+  polyline: '<path d="M4 18 9 8l6 8 5-10"/><circle cx="4" cy="18" r="1.5"/><circle cx="9" cy="8" r="1.5"/><circle cx="15" cy="16" r="1.5"/><circle cx="20" cy="6" r="1.5"/>',
+  square: '<rect width="14" height="14" x="5" y="5" rx="1"/>',
+  "text-bigger": '<path d="M4 18h2l1.5-4h5L14 18h2L11 6H9L4 18Z"/><path d="M8.2 12h3.6"/><path d="M18 9v6"/><path d="M15 12h6"/>',
+  "text-smaller": '<path d="M4 18h2l1.5-4h5L14 18h2L11 6H9L4 18Z"/><path d="M8.2 12h3.6"/><path d="M16 12h6"/>',
+  trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>',
+  type: '<path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/>',
+  undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/>'
+};
+
+function setButtonIcon(button: HTMLButtonElement, icon: StockNoteIcon, label: string, showText = false): void {
+  button.empty();
+  button.setAttribute("aria-label", label);
+  button.setAttribute("title", label);
+  const iconEl = button.createSpan({ cls: "stock-note-button-icon" });
+  iconEl.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICON_PATHS[icon]}</svg>`;
+  if (showText) {
+    button.createSpan({ cls: "stock-note-button-label", text: label });
+  }
+}
+
+function getLineHint(element: HTMLElement): number | null {
+  const lineEl = element.closest<HTMLElement>("[data-line]");
+  const rawLine = lineEl?.getAttribute("data-line");
+  if (!rawLine) {
+    return null;
+  }
+
+  const line = Number.parseInt(rawLine, 10);
+  return Number.isFinite(line) ? line : null;
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target.isContentEditable ||
+    target.closest("[contenteditable='true']") !== null
+  );
 }
 
 async function fetchQuoteSnapshot(symbol: string): Promise<QuoteSnapshot> {

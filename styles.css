@@ -153,6 +153,13 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   background: var(--background-secondary);
 }
 
+.stock-note-chart-frame {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+  line-height: 0;
+}
+
 .stock-note-popover-image {
   display: block;
   width: 100%;
@@ -161,11 +168,64 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   object-fit: contain;
 }
 
+.stock-note-annotation-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.stock-note-annotation-canvas.is-active {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.stock-note-annotation-text-input {
+  position: absolute;
+  z-index: 1;
+  min-width: 92px;
+  max-width: 220px;
+  padding: 2px 6px;
+  border: 1px solid var(--interactive-accent);
+  border-radius: 4px;
+  background: var(--background-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  line-height: 1.2;
+  transform: translateY(-2px);
+}
+
 .stock-note-popover-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-start;
   gap: 6px;
   margin-top: 8px;
+}
+
+.stock-note-color-tools,
+.stock-note-font-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.stock-note-snapshot-controls {
+  display: inline-flex;
+  align-items: center;
+}
+
+.stock-note-snapshot-controls .stock-note-copy-button {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.stock-note-snapshot-controls .stock-note-menu-button {
+  width: 24px;
+  margin-left: -1px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
 }
 
 .stock-note-action-button {
@@ -180,6 +240,44 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   cursor: pointer;
 }
 
+.stock-note-copy-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.stock-note-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  padding: 0;
+}
+
+.stock-note-button-icon,
+.stock-note-button-icon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.stock-note-button-icon svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.stock-note-button-label {
+  line-height: 1;
+}
+
+.stock-note-action-button.is-active {
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
 .stock-note-action-button:hover {
   border-color: var(--interactive-accent);
   color: var(--interactive-accent);
@@ -188,6 +286,39 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 .stock-note-action-button:disabled {
   cursor: default;
   opacity: 0.65;
+}
+
+.stock-note-color-button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 50%;
+  background: var(--background-secondary);
+  cursor: pointer;
+}
+
+.stock-note-color-button::before {
+  content: "";
+  display: block;
+  width: 12px;
+  height: 12px;
+  margin: 4px auto;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 50%;
+  background: var(--stock-note-annotation-color);
+}
+
+.stock-note-color-button.is-active {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+}
+
+.stock-note-font-size-value {
+  min-width: 20px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  text-align: center;
 }
 
 .stock-note-popover-loading {
