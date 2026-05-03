@@ -15,7 +15,7 @@
 }
 
 a.stock-note-link,
-.markdown-source-view.mod-cm6.is-live-preview .stock-note-link-cm {
+.markdown-source-view.mod-cm6 .stock-note-link-cm {
   color: var(--stock-note-link-color, #d14b3f) !important;
   font-weight: var(--stock-note-link-font-weight, inherit);
 }
@@ -30,6 +30,7 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 
 .stock-note-link-cm {
   border-radius: 4px;
+  cursor: pointer;
 }
 
 .stock-note-popover {

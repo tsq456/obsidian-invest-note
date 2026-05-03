@@ -25,6 +25,7 @@ export type InvestmentNotesSettings = {
   stockListTtlDays: number;
   defaultChartPeriod: ChartPeriod;
   enableHoverPreview: boolean;
+  enableSourceHoverPreview: boolean;
   linkTextColor: string;
   linkBackgroundColor: string;
   linkBorderColor: string;
@@ -44,6 +45,7 @@ export const DEFAULT_SETTINGS: InvestmentNotesSettings = {
   stockListTtlDays: 7,
   defaultChartPeriod: "min",
   enableHoverPreview: true,
+  enableSourceHoverPreview: true,
   linkTextColor: "#d14b3f",
   linkBackgroundColor: "rgba(209, 75, 63, 0.08)",
   linkBorderColor: "rgba(209, 75, 63, 0.24)",

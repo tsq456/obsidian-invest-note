@@ -52,6 +52,18 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("源码模式预览卡片")
+      .setDesc("在源码模式和实时预览模式中，鼠标移入股票文本时展示同一张预览卡片。")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.data.settings.enableSourceHoverPreview)
+          .onChange(async (value) => {
+            this.plugin.data.settings.enableSourceHoverPreview = value;
+            await this.plugin.savePluginData();
+          })
+      );
+
+    new Setting(containerEl)
       .setName("默认图表周期")
       .setDesc("悬浮预览默认展示的新浪财经图片周期。")
       .addDropdown((dropdown) => {

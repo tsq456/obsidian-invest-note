@@ -40,6 +40,12 @@ type EastMoneyQuoteResponse = {
   };
 };
 
+type StockHoverTarget = {
+  element: HTMLElement;
+  symbol: string;
+  sourceMode: boolean;
+};
+
 export class HoverPreview {
   private popoverEl: HTMLElement | null = null;
   private hideTimer: number | null = null;
@@ -54,18 +60,20 @@ export class HoverPreview {
 
   register(): void {
     this.plugin.registerDomEvent(document, "mouseover", (event) => {
-      const anchor = this.findStockAnchor(event.target);
-      if (!anchor) {
+      const target = this.findStockHoverTarget(event.target);
+      if (!target) {
         return;
       }
 
-      const href = anchor.getAttribute("href") ?? "";
-      const symbol = getXueqiuSymbolFromHref(href);
-      if (!symbol || !this.data.settings.enableHoverPreview) {
+      if (!this.data.settings.enableHoverPreview) {
         return;
       }
 
-      this.show(anchor, symbol);
+      if (target.sourceMode && !this.data.settings.enableSourceHoverPreview) {
+        return;
+      }
+
+      this.show(target.element, target.symbol);
     });
 
     this.plugin.registerDomEvent(document, "mouseout", (event) => {
@@ -75,12 +83,12 @@ export class HoverPreview {
         return;
       }
 
-      const anchor = this.findStockAnchor(target);
-      if (!anchor && !this.popoverEl.contains(target)) {
+      const stockTarget = this.findStockHoverTarget(target);
+      if (!stockTarget && !this.popoverEl.contains(target)) {
         return;
       }
 
-      if (relatedTarget && (this.popoverEl.contains(relatedTarget) || anchor?.contains(relatedTarget))) {
+      if (relatedTarget && (this.popoverEl.contains(relatedTarget) || stockTarget?.element.contains(relatedTarget))) {
         return;
       }
 
@@ -88,7 +96,7 @@ export class HoverPreview {
     });
   }
 
-  private show(anchor: HTMLAnchorElement, symbol: string): void {
+  private show(targetEl: HTMLElement, symbol: string): void {
     this.clearHideTimer();
     this.popoverEl?.remove();
     this.activeSymbol = symbol;
@@ -142,7 +150,7 @@ export class HoverPreview {
     popover.addEventListener("mouseleave", () => this.scheduleHide());
 
     document.body.appendChild(popover);
-    this.positionPopover(anchor, popover);
+    this.positionPopover(targetEl, popover);
     this.popoverEl = popover;
   }
 
@@ -240,8 +248,8 @@ export class HoverPreview {
     return stock ? `${stock.name}（${code}）` : code;
   }
 
-  private positionPopover(anchor: HTMLAnchorElement, popover: HTMLElement): void {
-    const anchorRect = anchor.getBoundingClientRect();
+  private positionPopover(targetEl: HTMLElement, popover: HTMLElement): void {
+    const anchorRect = targetEl.getBoundingClientRect();
     const popoverRect = popover.getBoundingClientRect();
     const margin = 8;
 
@@ -260,9 +268,19 @@ export class HoverPreview {
     popover.style.top = `${Math.max(margin, top)}px`;
   }
 
-  private findStockAnchor(target: EventTarget | Node | null): HTMLAnchorElement | null {
+  private findStockHoverTarget(target: EventTarget | Node | null): StockHoverTarget | null {
     if (!(target instanceof HTMLElement)) {
       return null;
+    }
+
+    const sourceTarget = target.closest<HTMLElement>("[data-stock-note-symbol]");
+    const sourceSymbol = sourceTarget?.getAttribute("data-stock-note-symbol");
+    if (sourceTarget && sourceSymbol) {
+      return {
+        element: sourceTarget,
+        symbol: sourceSymbol.toUpperCase(),
+        sourceMode: true
+      };
     }
 
     const anchor = target.closest("a");
@@ -271,7 +289,8 @@ export class HoverPreview {
     }
 
     const href = anchor.getAttribute("href") ?? "";
-    return getXueqiuSymbolFromHref(href) ? anchor : null;
+    const symbol = getXueqiuSymbolFromHref(href);
+    return symbol ? { element: anchor, symbol, sourceMode: false } : null;
   }
 
   private scheduleHide(): void {

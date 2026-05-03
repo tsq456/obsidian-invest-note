@@ -11,7 +11,7 @@ import { getXueqiuSymbolFromHref } from "./stockStore";
 import type { InvestmentNotesSettings } from "./types";
 
 const MARKDOWN_STOCK_LINK_REGEX =
-  /\[(\$[^\]\n]+?\$)\]\(https?:\/\/xueqiu\.com\/S\/(?:SH|SZ|BJ)\d{6}[^\)]*\)/gi;
+  /\[(\$[^\]\n]+?\$)\]\(https?:\/\/xueqiu\.com\/S\/((?:SH|SZ|BJ)\d{6})[^\)]*\)/gi;
 const RENDERED_STOCK_LABEL_REGEX = /^\$\s*(.+?)\s*\$$/;
 
 export function decorateRenderedStockLinks(el: HTMLElement): void {
@@ -73,9 +73,6 @@ export function applyStockLinkStyleVariables(settings: InvestmentNotesSettings):
 
 function buildDecorations(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
-  const stockLinkMark = Decoration.mark({
-    class: "stock-note-link stock-note-link-cm"
-  });
 
   for (const range of view.visibleRanges) {
     const text = view.state.doc.sliceString(range.from, range.to);
@@ -83,9 +80,16 @@ function buildDecorations(view: EditorView): DecorationSet {
 
     for (let match = MARKDOWN_STOCK_LINK_REGEX.exec(text); match; match = MARKDOWN_STOCK_LINK_REGEX.exec(text)) {
       const label = match[1];
+      const symbol = match[2].toUpperCase();
       const matchStart = range.from + match.index;
       const labelStart = matchStart + 1;
       const labelEnd = labelStart + label.length;
+      const stockLinkMark = Decoration.mark({
+        attributes: {
+          class: "stock-note-link stock-note-link-cm",
+          "data-stock-note-symbol": symbol
+        }
+      });
       builder.add(labelStart, labelEnd, stockLinkMark);
     }
   }
