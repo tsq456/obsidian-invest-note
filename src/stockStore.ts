@@ -1,7 +1,7 @@
 import { Notice, Plugin, requestUrl } from "obsidian";
 import { pinyin } from "pinyin-pro";
 import seedStocks from "../data/stocks.seed.json";
-import type { InvestmentNotesData, StockCache, StockInfo, StockMarket } from "./types";
+import type { ChartPeriod, InvestmentAsset, InvestmentNotesData, StockInfo, StockMarket } from "./types";
 
 const EASTMONEY_BASE_QUERY =
   "/api/qt/clist/get?pn=1&pz=100&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fields=f12,f13,f14";
@@ -15,8 +15,8 @@ const EASTMONEY_MARKET_FILTERS = [
   "m:0+t:81+s:2048"
 ];
 const TUSHARE_API_URL = "https://api.tushare.pro";
-const EASTMONEY_PAGE_SIZE = 100;
-const EMBEDDED_SEED_STOCKS = seedStocks as StockInfo[];
+const EASTMONEY_FUND_CODE_URL = "https://fund.eastmoney.com/js/fundcode_search.js";
+const EMBEDDED_SEED_STOCKS = seedStocks as Array<Partial<InvestmentAsset> & Pick<InvestmentAsset, "code" | "market" | "name" | "symbol" | "sina" | "xueqiu" | "pinyin" | "abbr">>;
 
 type EastMoneyDiffItem = {
   f12?: string;
@@ -41,7 +41,7 @@ type TushareResponse = {
 };
 
 export class StockStore {
-  private stocks: StockInfo[] = [];
+  private assets: InvestmentAsset[] = [];
 
   constructor(
     private readonly plugin: Plugin,
@@ -50,9 +50,9 @@ export class StockStore {
   ) {}
 
   async initialize(): Promise<void> {
-    const seedStocks = await this.loadSeedStocks();
-    const cachedStocks = this.data.stockCache?.stocks ?? [];
-    this.stocks = cachedStocks.length > 0 ? cachedStocks : seedStocks;
+    const seedAssets = await this.loadSeedAssets();
+    const cachedAssets = this.data.assetCache?.assets ?? this.data.stockCache?.stocks ?? [];
+    this.assets = cachedAssets.length > 0 ? normalizeCachedAssets(cachedAssets) : seedAssets;
 
     if (this.data.settings.autoUpdateStockList && this.isCacheExpired()) {
       const refreshTimer = window.setTimeout(() => {
@@ -62,61 +62,63 @@ export class StockStore {
     }
   }
 
-  getAll(): StockInfo[] {
-    return this.stocks;
+  getAll(): InvestmentAsset[] {
+    return this.assets;
   }
 
-  getBySymbol(symbol: string): StockInfo | null {
+  getBySymbol(symbol: string): InvestmentAsset | null {
     const normalized = symbol.toUpperCase();
-    return this.stocks.find((stock) => stock.symbol === normalized) ?? null;
+    return this.assets.find((asset) => asset.symbol === normalized) ?? null;
   }
 
-  search(query: string, limit = 20): StockInfo[] {
+  search(query: string, limit = 20): InvestmentAsset[] {
     const normalized = normalizeSearchText(query);
     if (!normalized) {
-      return this.stocks.slice(0, limit);
+      return this.assets.slice(0, limit);
     }
 
-    return this.stocks
-      .map((stock) => ({
-        stock,
-        score: scoreStock(stock, normalized)
+    return this.assets
+      .map((asset, index) => ({
+        asset,
+        index,
+        score: scoreAsset(asset, normalized)
       }))
       .filter((entry) => entry.score > 0)
-      .sort((a, b) => b.score - a.score || a.stock.code.localeCompare(b.stock.code))
+      .sort((a, b) => b.score - a.score || a.index - b.index)
       .slice(0, limit)
-      .map((entry) => entry.stock);
+      .map((entry) => entry.asset);
   }
 
   async refreshFromRemote(showNotice = true): Promise<void> {
     try {
-      const remoteStocks = await this.fetchRemoteStocks();
-      if (remoteStocks.length === 0) {
-        throw new Error("远端返回了空股票列表");
+      const remoteAssets = await this.fetchRemoteAssets();
+      if (remoteAssets.length === 0) {
+        throw new Error("远端返回了空标的列表");
       }
 
-      this.stocks = remoteStocks;
-      this.data.stockCache = {
-        stocks: remoteStocks,
+      this.assets = remoteAssets;
+      this.data.assetCache = {
+        assets: remoteAssets,
         updatedAt: Date.now(),
-        sourceVersion: this.data.settings.tushareToken ? "tushare-stock-basic-v1" : "eastmoney-clist-v2"
+        sourceVersion: "investment-assets-v1"
       };
+      this.data.stockCache = null;
       await this.persist();
 
       if (showNotice) {
-        new Notice(`股票列表已更新：${remoteStocks.length} 只`);
+        new Notice(`标的列表已更新：${remoteAssets.length} 个`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[investment-notes] Stock list refresh failed; using local cache. ${message}`);
+      console.warn(`[investment-notes] Asset list refresh failed; using local cache. ${message}`);
       if (showNotice) {
-        new Notice("股票列表刷新失败，已继续使用本地缓存");
+        new Notice("标的列表刷新失败，已继续使用本地缓存");
       }
     }
   }
 
   getLastUpdatedText(): string {
-    const updatedAt = this.data.stockCache?.updatedAt;
+    const updatedAt = this.data.assetCache?.updatedAt ?? this.data.stockCache?.updatedAt;
     if (!updatedAt) {
       return "尚未刷新，正在使用内置种子库";
     }
@@ -125,27 +127,55 @@ export class StockStore {
   }
 
   private isCacheExpired(): boolean {
-    const updatedAt = this.data.stockCache?.updatedAt ?? 0;
+    const updatedAt = this.data.assetCache?.updatedAt ?? this.data.stockCache?.updatedAt ?? 0;
     const ttlDays = Math.max(1, this.data.settings.stockListTtlDays);
     return Date.now() - updatedAt > ttlDays * 24 * 60 * 60 * 1000;
   }
 
-  private async loadSeedStocks(): Promise<StockInfo[]> {
+  private async loadSeedAssets(): Promise<InvestmentAsset[]> {
     const dir = this.plugin.manifest.dir;
     if (!dir) {
-      return EMBEDDED_SEED_STOCKS;
+      return normalizeCachedAssets(EMBEDDED_SEED_STOCKS);
     }
 
     try {
       const raw = await this.plugin.app.vault.adapter.read(`${dir}/data/stocks.seed.json`);
-      return JSON.parse(raw) as StockInfo[];
+      return normalizeCachedAssets(JSON.parse(raw) as StockInfo[]);
     } catch (error) {
       console.warn("[investment-notes] Failed to load seed stock list from plugin data folder; using bundled seed.", error);
-      return EMBEDDED_SEED_STOCKS;
+      return normalizeCachedAssets(EMBEDDED_SEED_STOCKS);
     }
   }
 
-  private async fetchRemoteStocks(): Promise<StockInfo[]> {
+  private async fetchRemoteAssets(): Promise<InvestmentAsset[]> {
+    const errors: string[] = [];
+    const groups: InvestmentAsset[][] = [];
+
+    try {
+      groups.push(await this.fetchRemoteStocks());
+    } catch (error) {
+      errors.push(`股票: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    try {
+      groups.push(await this.fetchEastMoneyFunds());
+    } catch (error) {
+      errors.push(`场外基金: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    const assets = dedupeAssets(groups.flat());
+    if (assets.length === 0) {
+      throw new Error(errors.join(" | "));
+    }
+
+    if (errors.length > 0) {
+      console.warn(`[investment-notes] Partial asset refresh failure: ${errors.join(" | ")}`);
+    }
+
+    return assets;
+  }
+
+  private async fetchRemoteStocks(): Promise<InvestmentAsset[]> {
     const token = this.data.settings.tushareToken.trim();
     const errors: string[] = [];
 
@@ -166,7 +196,7 @@ export class StockStore {
     throw new Error(errors.join(" | "));
   }
 
-  private async fetchTushareStocks(token: string): Promise<StockInfo[]> {
+  private async fetchTushareStocks(token: string): Promise<InvestmentAsset[]> {
     const response = await requestUrl({
       url: TUSHARE_API_URL,
       method: "POST",
@@ -190,7 +220,7 @@ export class StockStore {
     const items = body.data?.items ?? [];
     const stocks = items
       .map((item) => normalizeTushareStock(fields, item))
-      .filter((stock): stock is StockInfo => stock !== null);
+      .filter((stock): stock is InvestmentAsset => stock !== null);
 
     if (stocks.length === 0) {
       throw new Error("Tushare 返回了空股票列表");
@@ -199,7 +229,7 @@ export class StockStore {
     return stocks;
   }
 
-  private async fetchEastMoneyStocks(): Promise<StockInfo[]> {
+  private async fetchEastMoneyStocks(): Promise<InvestmentAsset[]> {
     const errors: string[] = [];
 
     for (const host of EASTMONEY_HOSTS) {
@@ -213,18 +243,22 @@ export class StockStore {
     throw new Error(errors.join(" | "));
   }
 
-  private async fetchEastMoneyStocksFromHost(host: string): Promise<StockInfo[]> {
-    const allStocks: StockInfo[] = [];
+  private async fetchEastMoneyStocksFromHost(host: string): Promise<InvestmentAsset[]> {
+    const allStocks: InvestmentAsset[] = [];
 
     for (const marketFilter of EASTMONEY_MARKET_FILTERS) {
-      allStocks.push(...(await this.fetchEastMoneyStocksByMarket(host, marketFilter)));
+      allStocks.push(...(await this.fetchEastMoneyAssetsByMarket(host, marketFilter, "stock")));
     }
 
-    return dedupeStocks(allStocks);
+    return dedupeAssets(allStocks);
   }
 
-  private async fetchEastMoneyStocksByMarket(host: string, marketFilter: string): Promise<StockInfo[]> {
-    const stocks: StockInfo[] = [];
+  private async fetchEastMoneyAssetsByMarket(
+    host: string,
+    marketFilter: string,
+    assetType: "stock"
+  ): Promise<InvestmentAsset[]> {
+    const assets: InvestmentAsset[] = [];
     let total = Number.POSITIVE_INFINITY;
     let fetchedRows = 0;
 
@@ -252,10 +286,10 @@ export class StockStore {
       }
 
       fetchedRows += rows.length;
-      stocks.push(
+      assets.push(
         ...rows
-          .map((item) => normalizeEastMoneyStock(item))
-          .filter((stock): stock is StockInfo => stock !== null)
+          .map((item) => normalizeEastMoneyAsset(item, assetType))
+          .filter((asset): asset is InvestmentAsset => asset !== null)
       );
 
       if (page > 100) {
@@ -263,11 +297,40 @@ export class StockStore {
       }
     }
 
-    return stocks;
+    return assets;
+  }
+
+  private async fetchEastMoneyFunds(): Promise<InvestmentAsset[]> {
+    const rows = await this.fetchEastMoneyFundCodeRows();
+    const funds = rows
+      .map((row) => normalizeEastMoneyFund(row))
+      .filter((asset): asset is InvestmentAsset => asset !== null);
+    if (funds.length === 0) {
+      throw new Error("天天基金返回了空基金列表");
+    }
+
+    return funds;
+  }
+  private async fetchEastMoneyFundCodeRows(): Promise<unknown[][]> {
+    const response = await requestUrl({
+      url: EASTMONEY_FUND_CODE_URL,
+      method: "GET",
+      headers: {
+        Accept: "application/javascript,text/plain,*/*",
+        Referer: "https://fund.eastmoney.com/",
+        "User-Agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Obsidian Investment Notes"
+      }
+    });
+    const match = response.text.match(/var\s+r\s*=\s*(\[[\s\S]*\]);?/);
+    if (!match) {
+      throw new Error("天天基金列表格式已变化");
+    }
+
+    return JSON.parse(match[1]) as unknown[][];
   }
 }
 
-function normalizeTushareStock(fields: string[], item: unknown[]): StockInfo | null {
+function normalizeTushareStock(fields: string[], item: unknown[]): InvestmentAsset | null {
   const record = Object.fromEntries(fields.map((field, index) => [field, item[index]]));
   const tsCode = typeof record.ts_code === "string" ? record.ts_code.trim() : "";
   const code = typeof record.symbol === "string" ? record.symbol.trim() : "";
@@ -284,10 +347,10 @@ function normalizeTushareStock(fields: string[], item: unknown[]): StockInfo | n
     return null;
   }
 
-  return buildStockInfo(code, market, name);
+  return buildAssetInfo("stock", code, market, name);
 }
 
-function normalizeEastMoneyStock(item: EastMoneyDiffItem): StockInfo | null {
+function normalizeEastMoneyAsset(item: EastMoneyDiffItem, assetType: "stock"): InvestmentAsset | null {
   const code = item.f12?.trim();
   const name = item.f14?.trim();
   if (!code || !name || !/^\d{6}$/.test(code)) {
@@ -299,57 +362,77 @@ function normalizeEastMoneyStock(item: EastMoneyDiffItem): StockInfo | null {
     return null;
   }
 
-  const fullPinyin = pinyin(name, {
-    toneType: "none",
-    type: "array",
-    nonZh: "removed"
-  })
-    .join("")
-    .toLowerCase();
-
-  const abbr = pinyin(name, {
-    toneType: "none",
-    pattern: "first",
-    type: "array",
-    nonZh: "removed"
-  })
-    .join("")
-    .toLowerCase();
-
-  return buildStockInfo(code, market, name);
+  return buildAssetInfo(assetType, code, market, name);
 }
 
-function buildStockInfo(code: string, market: StockMarket, name: string): StockInfo {
-  const fullPinyin = pinyin(name, {
-    toneType: "none",
-    type: "array",
-    nonZh: "removed"
-  })
-    .join("")
-    .toLowerCase();
-
-  const abbr = pinyin(name, {
-    toneType: "none",
-    pattern: "first",
-    type: "array",
-    nonZh: "removed"
-  })
-    .join("")
-    .toLowerCase();
-
-  const symbol = `${market}${code}`;
-  const sina = `${market.toLowerCase()}${code}`;
+function normalizeEastMoneyFund(row: unknown[]): InvestmentAsset | null {
+  const code = typeof row[0] === "string" ? row[0].trim() : "";
+  const abbr = typeof row[1] === "string" ? row[1].trim().toLowerCase() : "";
+  const name = typeof row[2] === "string" ? row[2].trim() : "";
+  const category = typeof row[3] === "string" ? row[3].trim() : "";
+  const fullPinyin = typeof row[4] === "string" ? row[4].trim().toLowerCase() : "";
+  if (!/^\d{6}$/.test(code) || !name) {
+    return null;
+  }
 
   return {
+    assetType: "fund",
+    code,
+    market: "OF",
+    name,
+    symbol: `OF${code}`,
+    sina: "",
+    xueqiu: "",
+    url: `https://fund.eastmoney.com/${code}.html`,
+    pinyin: fullPinyin || toFullPinyin(name),
+    abbr: abbr || toPinyinAbbr(name),
+    category
+  };
+}
+
+function buildAssetInfo(assetType: "stock", code: string, market: StockMarket, name: string): InvestmentAsset {
+  const symbol = `${market}${code}`;
+
+  return {
+    assetType,
     code,
     market,
     name,
     symbol,
-    sina,
+    sina: `${market.toLowerCase()}${code}`,
     xueqiu: `https://xueqiu.com/S/${symbol}`,
-    pinyin: fullPinyin,
-    abbr
+    url: `https://xueqiu.com/S/${symbol}`,
+    pinyin: toFullPinyin(name),
+    abbr: toPinyinAbbr(name)
   };
+}
+
+function normalizeCachedAssets(assets: Array<Partial<InvestmentAsset> & Pick<InvestmentAsset, "code" | "market" | "name" | "symbol">>): InvestmentAsset[] {
+  return assets
+    .map((asset) => {
+      if (asset.symbol.startsWith("OF") || asset.assetType === "fund" || asset.market === "OF") {
+        return normalizeEastMoneyFund([
+          asset.code,
+          asset.abbr ?? "",
+          asset.name,
+          asset.category ?? "",
+          asset.pinyin ?? ""
+        ]);
+      }
+
+      const market = asset.market === "SH" || asset.market === "SZ" || asset.market === "BJ" ? asset.market : null;
+      if (!market) {
+        return null;
+      }
+
+      const cachedAssetType: string = typeof asset.assetType === "string" ? asset.assetType : "stock";
+      if (cachedAssetType === "listedFund" || cachedAssetType === "etf") {
+        return null;
+      }
+
+      return buildAssetInfo("stock", asset.code, market, asset.name);
+    })
+    .filter((asset): asset is InvestmentAsset => asset !== null);
 }
 
 function tushareMarketFromExchange(exchange: string): StockMarket | null {
@@ -373,28 +456,16 @@ function tushareMarketFromTsCode(tsCode: string): StockMarket | null {
   return null;
 }
 
-function dedupeStocks(stocks: StockInfo[]): StockInfo[] {
-  const bySymbol = new Map<string, StockInfo>();
-  for (const stock of stocks) {
-    bySymbol.set(stock.symbol, stock);
+function dedupeAssets(assets: InvestmentAsset[]): InvestmentAsset[] {
+  const byKey = new Map<string, InvestmentAsset>();
+  for (const asset of assets) {
+    byKey.set(`${asset.assetType}:${asset.symbol}`, asset);
   }
 
-  return Array.from(bySymbol.values());
+  return Array.from(byKey.values());
 }
 
 function inferMarket(code: string, eastMoneyMarket?: number): StockMarket | null {
-  if (code.startsWith("6")) {
-    return "SH";
-  }
-
-  if (code.startsWith("0") || code.startsWith("3")) {
-    return "SZ";
-  }
-
-  if (code.startsWith("4") || code.startsWith("8") || code.startsWith("9")) {
-    return "BJ";
-  }
-
   if (eastMoneyMarket === 1) {
     return "SH";
   }
@@ -403,16 +474,29 @@ function inferMarket(code: string, eastMoneyMarket?: number): StockMarket | null
     return "SZ";
   }
 
+  if (code.startsWith("6") || code.startsWith("5")) {
+    return "SH";
+  }
+
+  if (code.startsWith("0") || code.startsWith("1") || code.startsWith("2") || code.startsWith("3")) {
+    return "SZ";
+  }
+
+  if (code.startsWith("4") || code.startsWith("8") || code.startsWith("9")) {
+    return "BJ";
+  }
+
   return null;
 }
 
-function scoreStock(stock: StockInfo, query: string): number {
-  const code = stock.code.toLowerCase();
-  const symbol = stock.symbol.toLowerCase();
-  const name = stock.name.toLowerCase();
-  const py = stock.pinyin.toLowerCase();
-  const abbr = stock.abbr.toLowerCase();
-  const sina = stock.sina.toLowerCase();
+function scoreAsset(asset: InvestmentAsset, query: string): number {
+  const code = asset.code.toLowerCase();
+  const symbol = asset.symbol.toLowerCase();
+  const name = asset.name.toLowerCase();
+  const py = asset.pinyin.toLowerCase();
+  const abbr = asset.abbr.toLowerCase();
+  const sina = asset.sina.toLowerCase();
+  const category = (asset.category ?? "").toLowerCase();
 
   if (code === query || symbol === query || sina === query) return 100;
   if (name === query || py === query || abbr === query) return 95;
@@ -420,7 +504,7 @@ function scoreStock(stock: StockInfo, query: string): number {
   if (name.startsWith(query) || py.startsWith(query) || abbr.startsWith(query)) return 80;
   if (name.includes(query)) return 70;
   if (py.includes(query) || abbr.includes(query)) return 60;
-  if (code.includes(query) || symbol.includes(query)) return 50;
+  if (code.includes(query) || symbol.includes(query) || category.includes(query)) return 50;
   return 0;
 }
 
@@ -428,16 +512,67 @@ function normalizeSearchText(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, "");
 }
 
-export function getSinaChartUrl(symbol: string, period: string): string | null {
-  const match = symbol.toUpperCase().match(/^(SH|SZ|BJ)(\d{6})$/);
+function toFullPinyin(name: string): string {
+  return pinyin(name, {
+    toneType: "none",
+    type: "array",
+    nonZh: "removed"
+  })
+    .join("")
+    .toLowerCase();
+}
+
+function toPinyinAbbr(name: string): string {
+  return pinyin(name, {
+    toneType: "none",
+    pattern: "first",
+    type: "array",
+    nonZh: "removed"
+  })
+    .join("")
+    .toLowerCase();
+}
+
+export function getAssetChartUrl(symbol: string, period: ChartPeriod): string | null {
+  const normalized = symbol.toUpperCase();
+  const fundMatch = normalized.match(/^OF(\d{6})$/);
+  if (fundMatch) {
+    if (period === "netWorth") {
+      return `https://j4.dfcfw.com/charts/pic6/${fundMatch[1]}.png`;
+    }
+    if (period === "accWorth") {
+      return `https://j4.dfcfw.com/charts/pic7/${fundMatch[1]}.png`;
+    }
+    return null;
+  }
+
+  const match = normalized.match(/^(SH|SZ|BJ)(\d{6})$/);
   if (!match) {
+    return null;
+  }
+
+  if (period === "netWorth" || period === "accWorth") {
     return null;
   }
 
   return `https://image.sinajs.cn/newchart/${period}/n/${match[1].toLowerCase()}${match[2]}.gif`;
 }
 
+export function getSinaChartUrl(symbol: string, period: ChartPeriod): string | null {
+  return getAssetChartUrl(symbol, period);
+}
+
+export function getAssetSymbolFromHref(href: string): string | null {
+  const xueqiuMatch = href.match(/https?:\/\/xueqiu\.com\/S\/((?:SH|SZ|BJ)\d{6})/i);
+  if (xueqiuMatch) {
+    return xueqiuMatch[1].toUpperCase();
+  }
+
+  const fundMatch = href.match(/https?:\/\/fund\.eastmoney\.com\/(\d{6})(?:\.html)?/i);
+  return fundMatch ? `OF${fundMatch[1]}` : null;
+}
+
 export function getXueqiuSymbolFromHref(href: string): string | null {
-  const match = href.match(/https?:\/\/xueqiu\.com\/S\/((?:SH|SZ|BJ)\d{6})/i);
-  return match ? match[1].toUpperCase() : null;
+  const symbol = getAssetSymbolFromHref(href);
+  return symbol && !symbol.startsWith("OF") ? symbol : null;
 }

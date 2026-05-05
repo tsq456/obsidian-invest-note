@@ -1,8 +1,8 @@
 import { Editor, EditorPosition, EditorSuggest, EditorSuggestContext, EditorSuggestTriggerInfo, TFile } from "obsidian";
 import type InvestmentNotesPlugin from "./main";
-import type { StockInfo } from "./types";
+import type { InvestmentAsset } from "./types";
 
-export class StockSuggest extends EditorSuggest<StockInfo> {
+export class StockSuggest extends EditorSuggest<InvestmentAsset> {
   constructor(private readonly plugin: InvestmentNotesPlugin) {
     super(plugin.app);
   }
@@ -39,28 +39,33 @@ export class StockSuggest extends EditorSuggest<StockInfo> {
     };
   }
 
-  getSuggestions(context: EditorSuggestContext): StockInfo[] {
+  getSuggestions(context: EditorSuggestContext): InvestmentAsset[] {
     return this.plugin.stockStore.search(context.query);
   }
 
-  renderSuggestion(stock: StockInfo, el: HTMLElement): void {
+  renderSuggestion(stock: InvestmentAsset, el: HTMLElement): void {
     el.addClass("investment-notes-suggestion");
 
     const nameEl = el.createDiv({ cls: "investment-notes-suggestion-name" });
     nameEl.setText(stock.name);
 
     const metaEl = el.createDiv({ cls: "investment-notes-suggestion-meta" });
-    metaEl.setText(`${stock.symbol} · ${stock.abbr}`);
+    metaEl.setText(`${getAssetTypeLabel(stock)} · ${stock.symbol} · ${stock.category ?? stock.abbr}`);
   }
 
-  selectSuggestion(stock: StockInfo): void {
+  selectSuggestion(stock: InvestmentAsset): void {
     if (!this.context) {
       return;
     }
 
-    const replacement = `[$${stock.name}$](${stock.xueqiu})`;
+    const replacement = `[$${stock.name}$](${stock.url})`;
     this.context.editor.replaceRange(replacement, this.context.start, this.context.end);
   }
+}
+
+function getAssetTypeLabel(asset: InvestmentAsset): string {
+  if (asset.assetType === "fund") return "场外基金";
+  return "股票";
 }
 
 function isValidQueryFragment(query: string): boolean {

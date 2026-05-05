@@ -44,6 +44,7 @@ export default class InvestmentNotesPlugin extends Plugin {
         ...DEFAULT_SETTINGS,
         ...(saved?.settings ?? {})
       },
+      assetCache: saved?.assetCache ?? null,
       stockCache: saved?.stockCache ?? null
     };
   }

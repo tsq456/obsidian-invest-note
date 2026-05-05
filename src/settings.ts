@@ -2,7 +2,7 @@ import { Notice, PluginSettingTab, Setting } from "obsidian";
 import type InvestmentNotesPlugin from "./main";
 import type { ChartPeriod } from "./types";
 
-const PERIOD_OPTIONS: Record<ChartPeriod, string> = {
+const PERIOD_OPTIONS: Partial<Record<ChartPeriod, string>> = {
   min: "分时",
   daily: "日 K",
   weekly: "周 K",
@@ -22,7 +22,7 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("触发关键字")
-      .setDesc("用于触发股票搜索的固定字符串，例如 $、@、$$ 或 stock:。")
+      .setDesc("用于触发投资标的搜索的固定字符串，例如 $、@、$$ 或 stock:。")
       .addText((text) =>
         text
           .setPlaceholder("$")
@@ -41,7 +41,7 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("启用悬浮图表")
-      .setDesc("鼠标移入雪球股票链接时展示新浪财经图表。")
+      .setDesc("鼠标移入股票或场外基金链接时展示预览卡片。")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.data.settings.enableHoverPreview)
@@ -53,7 +53,7 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("源码模式预览卡片")
-      .setDesc("在源码模式和实时预览模式中，鼠标移入股票文本时展示同一张预览卡片。")
+      .setDesc("在源码模式和实时预览模式中，鼠标移入投资标的文本时展示同一张预览卡片。")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.data.settings.enableSourceHoverPreview)
@@ -65,7 +65,7 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("默认图表周期")
-      .setDesc("悬浮预览默认展示的新浪财经图片周期。")
+      .setDesc("股票悬浮预览默认展示的图片周期。场外基金默认展示净值走势。")
       .addDropdown((dropdown) => {
         Object.entries(PERIOD_OPTIONS).forEach(([value, label]) => dropdown.addOption(value, label));
         dropdown
@@ -76,11 +76,11 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
           });
       });
 
-    containerEl.createEl("h3", { text: "股票列表" });
+    containerEl.createEl("h3", { text: "标的列表" });
 
     new Setting(containerEl)
       .setName("Tushare Token")
-      .setDesc("可选。填写后刷新股票列表会优先使用 Tushare stock_basic；留空则使用东方财富免配置接口。")
+      .setDesc("可选。填写后刷新 A 股列表会优先使用 Tushare stock_basic；场外基金使用天天基金公开数据。")
       .addText((text) =>
         text
           .setPlaceholder("留空使用东方财富")
@@ -92,8 +92,8 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("自动更新股票列表")
-      .setDesc("启动时按刷新周期后台检查股票列表。配置 Tushare Token 后优先使用 Tushare。")
+      .setName("自动更新标的列表")
+      .setDesc("启动时按刷新周期后台检查股票和场外基金列表。")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.data.settings.autoUpdateStockList)
@@ -126,7 +126,7 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
       .setDesc(`上次刷新：${this.plugin.stockStore.getLastUpdatedText()}`)
       .addButton((button) =>
         button
-          .setButtonText("立即刷新股票列表")
+          .setButtonText("立即刷新标的列表")
           .setCta()
           .onClick(async () => {
             button.setDisabled(true).setButtonText("刷新中...");
@@ -135,7 +135,7 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
           })
       );
 
-    containerEl.createEl("h3", { text: "股票短链样式" });
+    containerEl.createEl("h3", { text: "标的短链样式" });
 
     this.addColorSetting("文本颜色", "linkTextColor");
     this.addColorSetting("背景色", "linkBackgroundColor");
@@ -143,7 +143,7 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("加粗")
-      .setDesc("让股票短链文本加粗。")
+      .setDesc("让标的短链文本加粗。")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.data.settings.linkBold)

@@ -10,8 +10,8 @@ import {
 } from "./chartAnnotation";
 import { copyChartSnapshotToClipboard, insertChartSnapshotBelowStockParagraph } from "./chartSnapshot";
 import type InvestmentNotesPlugin from "./main";
-import { getSinaChartUrl, getXueqiuSymbolFromHref } from "./stockStore";
-import type { ChartPeriod, InvestmentNotesData } from "./types";
+import { getAssetChartUrl, getAssetSymbolFromHref } from "./stockStore";
+import type { AssetType, ChartPeriod, InvestmentNotesData } from "./types";
 
 const CHART_PERIODS: Array<{ value: ChartPeriod; label: string }> = [
   { value: "min", label: "分时" },
@@ -19,7 +19,12 @@ const CHART_PERIODS: Array<{ value: ChartPeriod; label: string }> = [
   { value: "weekly", label: "周K" },
   { value: "monthly", label: "月K" }
 ];
+const FUND_CHART_PERIODS: Array<{ value: ChartPeriod; label: string }> = [
+  { value: "netWorth", label: "净值走势" },
+  { value: "accWorth", label: "累计净值" }
+];
 const DEFAULT_PERIOD: ChartPeriod = "min";
+const DEFAULT_FUND_PERIOD: ChartPeriod = "netWorth";
 const TEXT_FONT_STEP = 2;
 
 type QuoteSnapshot = {
@@ -50,9 +55,18 @@ type EastMoneyQuoteResponse = {
   };
 };
 
+type FundQuoteSnapshot = {
+  date: string;
+  name: string;
+  netWorth: number | null;
+  accWorth: number | null;
+  dailyReturn: number | null;
+};
+
 type StockHoverTarget = {
   element: HTMLElement;
   symbol: string;
+  assetType: AssetType;
   sourceMode: boolean;
   lineHint: number | null;
 };
@@ -69,6 +83,7 @@ export class HoverPreview {
   private activeLineHint: number | null = null;
   private activeKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
   private readonly quoteCache = new Map<string, QuoteSnapshot>();
+  private readonly fundQuoteCache = new Map<string, FundQuoteSnapshot>();
 
   constructor(
     private readonly plugin: InvestmentNotesPlugin,
@@ -116,8 +131,10 @@ export class HoverPreview {
   private show(targetEl: HTMLElement, symbol: string, lineHint: number | null): void {
     this.clearHideTimer();
     this.removePopover();
+    const assetType = getAssetTypeFromSymbol(symbol);
     this.activeSymbol = symbol;
-    this.activePeriod = normalizeChartPeriod(this.data.settings.defaultChartPeriod);
+    this.activePeriod =
+      assetType === "fund" ? DEFAULT_FUND_PERIOD : normalizeMarketChartPeriod(this.data.settings.defaultChartPeriod);
     this.annotationTool = "arrow";
     this.annotationColor = DEFAULT_ANNOTATION_COLOR;
     this.annotationFontSize = DEFAULT_TEXT_FONT_SIZE;
@@ -136,7 +153,7 @@ export class HoverPreview {
     const periodControls = popover.createDiv({ cls: "stock-note-period-tabs" });
     const imageWrap = popover.createDiv({ cls: "stock-note-popover-image-wrap" });
     const actions = popover.createDiv({ cls: "stock-note-popover-actions" });
-    CHART_PERIODS.forEach((period) => {
+    getChartPeriods(assetType).forEach((period) => {
       const button = periodControls.createEl("button", {
         cls: "stock-note-period-tab",
         text: period.label,
@@ -224,6 +241,22 @@ export class HoverPreview {
     quoteEl.createSpan({ cls: "stock-note-quote-loading", text: "行情加载中..." });
 
     try {
+      if (getAssetTypeFromSymbol(symbol) === "fund") {
+        const quote = await this.getFundQuoteSnapshot(symbol);
+        if (symbol !== this.activeSymbol) {
+          return;
+        }
+
+        quoteEl.empty();
+        renderFundSummary(quoteEl, quote);
+        const detailEl = quoteEl.createDiv({ cls: "stock-note-quote-row stock-note-fund-quote-row" });
+        addQuoteItem(detailEl, "日期", quote.date);
+        addQuoteItem(detailEl, "单位净值", formatNetWorth(quote.netWorth));
+        addQuoteItem(detailEl, "累计净值", formatNetWorth(quote.accWorth));
+        addQuoteItem(detailEl, "日涨幅", formatSignedPercent(quote.dailyReturn), getValueChangeClass(quote.dailyReturn));
+        return;
+      }
+
       const quote = await this.getQuoteSnapshot(symbol);
       if (symbol !== this.activeSymbol) {
         return;
@@ -254,7 +287,7 @@ export class HoverPreview {
     imageWrap.empty();
     const loading = imageWrap.createDiv({ cls: "stock-note-popover-loading", text: "图表加载中..." });
     const period = this.activePeriod;
-    const chartUrl = getSinaChartUrl(symbol, this.activePeriod);
+    const chartUrl = getAssetChartUrl(symbol, this.activePeriod);
     if (!chartUrl) {
       loading.setText("图表暂不可用");
       return;
@@ -436,10 +469,21 @@ export class HoverPreview {
     return quote;
   }
 
+  private async getFundQuoteSnapshot(symbol: string): Promise<FundQuoteSnapshot> {
+    const cached = this.fundQuoteCache.get(symbol);
+    if (cached) {
+      return cached;
+    }
+
+    const quote = await fetchFundQuoteSnapshot(symbol);
+    this.fundQuoteCache.set(symbol, quote);
+    return quote;
+  }
+
   private getDisplayTitle(symbol: string): string {
-    const stock = this.plugin.stockStore.getBySymbol(symbol);
-    const code = toTushareDisplayCode(symbol);
-    return stock ? `${stock.name}（${code}）` : code;
+    const asset = this.plugin.stockStore.getBySymbol(symbol);
+    const code = toDisplayCode(symbol);
+    return asset ? `${asset.name}（${code}）` : code;
   }
 
   private positionPopover(targetEl: HTMLElement, popover: HTMLElement): void {
@@ -470,9 +514,11 @@ export class HoverPreview {
     const sourceTarget = target.closest<HTMLElement>("[data-stock-note-symbol]");
     const sourceSymbol = sourceTarget?.getAttribute("data-stock-note-symbol");
     if (sourceTarget && sourceSymbol) {
+      const symbol = sourceSymbol.toUpperCase();
       return {
         element: sourceTarget,
-        symbol: sourceSymbol.toUpperCase(),
+        symbol,
+        assetType: getAssetTypeFromSymbol(symbol),
         sourceMode: true,
         lineHint: getLineHint(sourceTarget)
       };
@@ -484,8 +530,10 @@ export class HoverPreview {
     }
 
     const href = anchor.getAttribute("href") ?? "";
-    const symbol = getXueqiuSymbolFromHref(href);
-    return symbol ? { element: anchor, symbol, sourceMode: false, lineHint: getLineHint(anchor) } : null;
+    const symbol = getAssetSymbolFromHref(href);
+    return symbol
+      ? { element: anchor, symbol, assetType: getAssetTypeFromSymbol(symbol), sourceMode: false, lineHint: getLineHint(anchor) }
+      : null;
   }
 
   private scheduleHide(): void {
@@ -613,6 +661,63 @@ async function fetchQuoteSnapshot(symbol: string): Promise<QuoteSnapshot> {
   };
 }
 
+async function fetchFundQuoteSnapshot(symbol: string): Promise<FundQuoteSnapshot> {
+  const match = symbol.toUpperCase().match(/^OF(\d{6})$/);
+  if (!match) {
+    throw new Error(`Unsupported fund symbol: ${symbol}`);
+  }
+
+  const code = match[1];
+  const response = await requestUrl({
+    url: `https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`,
+    method: "GET",
+    headers: {
+      Accept: "application/javascript,text/plain,*/*",
+      Referer: `https://fund.eastmoney.com/${code}.html`,
+      "User-Agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Obsidian Investment Notes"
+    }
+  });
+  const text = response.text;
+  const name = parseStringVar(text, "fS_name") ?? code;
+  const netWorthTrend = parseJsonVar<Array<{ x?: number; y?: number; equityReturn?: number }>>(text, "Data_netWorthTrend");
+  const accWorthTrend = parseJsonVar<Array<[number, number]>>(text, "Data_ACWorthTrend");
+  const latestNetWorth = netWorthTrend && netWorthTrend.length > 0 ? netWorthTrend[netWorthTrend.length - 1] : null;
+  const latestAccWorth = accWorthTrend && accWorthTrend.length > 0 ? accWorthTrend[accWorthTrend.length - 1] : null;
+
+  return {
+    name,
+    date: latestNetWorth?.x ? formatDate(new Date(latestNetWorth.x)) : "-",
+    netWorth: toNullableNumber(latestNetWorth?.y),
+    accWorth: toNullableNumber(latestAccWorth?.[1]),
+    dailyReturn: toNullableNumber(latestNetWorth?.equityReturn)
+  };
+}
+
+function parseStringVar(text: string, name: string): string | null {
+  const match = text.match(new RegExp(`var\\s+${name}\\s*=\\s*"([^"]*)"`));
+  return match ? match[1] : null;
+}
+
+function parseJsonVar<T>(text: string, name: string): T | null {
+  const startMatch = text.match(new RegExp(`var\\s+${name}\\s*=`));
+  if (!startMatch || startMatch.index === undefined) {
+    return null;
+  }
+
+  const start = startMatch.index + startMatch[0].length;
+  const end = text.indexOf(";", start);
+  if (end < 0) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text.slice(start, end).trim()) as T;
+  } catch (error) {
+    console.warn(`[investment-notes] Failed to parse ${name}`, error);
+    return null;
+  }
+}
+
 function renderPriceSummary(parent: HTMLElement, quote: QuoteSnapshot): void {
   const changeClass = getValueChangeClass(quote.changeAmount);
   const summary = parent.createDiv({ cls: "stock-note-price-summary" });
@@ -633,6 +738,24 @@ function renderPriceSummary(parent: HTMLElement, quote: QuoteSnapshot): void {
     priceEl.addClass(changeClass);
     changeAmountEl.addClass(changeClass);
     changePercentEl.addClass(changeClass);
+  }
+}
+
+function renderFundSummary(parent: HTMLElement, quote: FundQuoteSnapshot): void {
+  const changeClass = getValueChangeClass(quote.dailyReturn);
+  const summary = parent.createDiv({ cls: "stock-note-price-summary stock-note-fund-summary" });
+  const netWorthEl = summary.createSpan({
+    cls: "stock-note-price-current",
+    text: formatNetWorth(quote.netWorth)
+  });
+  const dailyReturnEl = summary.createSpan({
+    cls: "stock-note-price-change",
+    text: formatSignedPercent(quote.dailyReturn)
+  });
+
+  if (changeClass) {
+    netWorthEl.addClass(changeClass);
+    dailyReturnEl.addClass(changeClass);
   }
 }
 
@@ -661,7 +784,20 @@ function getValueChangeClass(value: number | null): string | undefined {
   return value > 0 ? "stock-note-change-up" : "stock-note-change-down";
 }
 
-function normalizeChartPeriod(period: string): ChartPeriod {
+function getChartPeriods(assetType: AssetType): Array<{ value: ChartPeriod; label: string }> {
+  return assetType === "fund" ? FUND_CHART_PERIODS : CHART_PERIODS;
+}
+
+function getAssetTypeFromSymbol(symbol: string): AssetType {
+  const normalized = symbol.toUpperCase();
+  if (normalized.startsWith("OF")) {
+    return "fund";
+  }
+
+  return "stock";
+}
+
+function normalizeMarketChartPeriod(period: string): ChartPeriod {
   return CHART_PERIODS.some((item) => item.value === period) ? (period as ChartPeriod) : DEFAULT_PERIOD;
 }
 
@@ -675,7 +811,12 @@ function toEastMoneySecid(symbol: string): string | null {
   return `${marketCode}.${match[2]}`;
 }
 
-function toTushareDisplayCode(symbol: string): string {
+function toDisplayCode(symbol: string): string {
+  const fundMatch = symbol.toUpperCase().match(/^OF(\d{6})$/);
+  if (fundMatch) {
+    return fundMatch[1];
+  }
+
   const match = symbol.toUpperCase().match(/^(SH|SZ|BJ)(\d{6})$/);
   return match ? `${match[2]}.${match[1]}` : symbol;
 }
@@ -693,6 +834,10 @@ function formatDate(date: Date): string {
 
 function formatPrice(value: number | null): string {
   return value === null ? "-" : value.toFixed(2);
+}
+
+function formatNetWorth(value: number | null): string {
+  return value === null ? "-" : value.toFixed(4);
 }
 
 function formatCurrencyPrice(value: number | null): string {

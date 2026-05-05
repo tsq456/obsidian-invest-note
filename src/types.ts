@@ -1,15 +1,27 @@
 export type StockMarket = "SH" | "SZ" | "BJ";
-export type ChartPeriod = "min" | "daily" | "weekly" | "monthly";
+export type AssetType = "stock" | "fund";
+export type ChartPeriod = "min" | "daily" | "weekly" | "monthly" | "netWorth" | "accWorth";
 
-export type StockInfo = {
+export type InvestmentAsset = {
+  assetType: AssetType;
   code: string;
-  market: StockMarket;
+  market: StockMarket | "OF";
   name: string;
   symbol: string;
   sina: string;
   xueqiu: string;
+  url: string;
   pinyin: string;
   abbr: string;
+  category?: string;
+};
+
+export type StockInfo = InvestmentAsset;
+
+export type AssetCache = {
+  assets: InvestmentAsset[];
+  updatedAt: number;
+  sourceVersion: string;
 };
 
 export type StockCache = {
@@ -35,6 +47,7 @@ export type InvestmentNotesSettings = {
 
 export type InvestmentNotesData = {
   settings: InvestmentNotesSettings;
+  assetCache: AssetCache | null;
   stockCache: StockCache | null;
 };
 

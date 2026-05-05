@@ -1,6 +1,6 @@
 import { requestUrl, type App, type TFile } from "obsidian";
 import { renderAnnotations, type ChartAnnotationSnapshot } from "./chartAnnotation";
-import { getSinaChartUrl } from "./stockStore";
+import { getAssetChartUrl } from "./stockStore";
 import type { ChartPeriod } from "./types";
 
 const SNAPSHOT_DIR = "attachments/invest-note";
@@ -22,7 +22,7 @@ export async function copyChartSnapshotToClipboard({
   period,
   annotationSnapshot
 }: CopyChartSnapshotOptions): Promise<void> {
-  const chartUrl = getSinaChartUrl(symbol, period);
+  const chartUrl = getAssetChartUrl(symbol, period);
   if (!chartUrl) {
     throw new Error("走势图暂不可用");
   }
@@ -51,7 +51,7 @@ export async function insertChartSnapshotBelowStockParagraph({
     throw new Error("未找到当前笔记");
   }
 
-  const chartUrl = getSinaChartUrl(symbol, period);
+  const chartUrl = getAssetChartUrl(symbol, period);
   if (!chartUrl) {
     throw new Error("走势图暂不可用");
   }
@@ -60,7 +60,7 @@ export async function insertChartSnapshotBelowStockParagraph({
   const lines = content.split("\n");
   const paragraph = findStockParagraph(lines, symbol, lineHint);
   if (!paragraph) {
-    throw new Error("未找到股票文本所在段落");
+    throw new Error("未找到标的文本所在段落");
   }
 
   const imageBlob = await createChartSnapshotBlob(chartUrl, annotationSnapshot);
@@ -215,6 +215,11 @@ function expandParagraph(lines: string[], line: number): { start: number; end: n
 
 function paragraphContainsSymbol(lines: string[], paragraph: { start: number; end: number }, symbol: string): boolean {
   const text = lines.slice(paragraph.start, paragraph.end + 1).join("\n");
+  if (symbol.toUpperCase().startsWith("OF")) {
+    const code = symbol.slice(2);
+    return new RegExp(`https?:\\/\\/fund\\.eastmoney\\.com\\/${escapeRegExp(code)}(?:\\.html)?(?:[^\\w]|$)`, "i").test(text);
+  }
+
   return new RegExp(`https?:\\/\\/xueqiu\\.com\\/S\\/${escapeRegExp(symbol)}(?:[^\\w]|$)`, "i").test(text);
 }
 
