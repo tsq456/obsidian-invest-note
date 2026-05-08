@@ -1,7 +1,7 @@
 {
   "name": "obsidian-investment-notes",
-  "version": "0.2.1",
-  "description": "A-share and mutual fund note links, search, and chart hover previews for Obsidian.",
+  "version": "0.2.4",
+  "description": "A-share, ETF, and mutual fund note links, search, and chart hover previews for Obsidian.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
@@ -11,6 +11,7 @@
     "obsidian",
     "plugin",
     "stocks",
+    "etf",
     "funds",
     "investment-notes"
   ],

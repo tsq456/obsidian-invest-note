@@ -74,6 +74,9 @@ type StockHoverTarget = {
 export class HoverPreview {
   private popoverEl: HTMLElement | null = null;
   private hideTimer: number | null = null;
+  private showTimer: number | null = null;
+  private pendingTarget: StockHoverTarget | null = null;
+  private hoverLoaderEl: HTMLElement | null = null;
   private activePeriod: ChartPeriod = DEFAULT_PERIOD;
   private activeSymbol: string | null = null;
   private annotationController: ChartAnnotationController | null = null;
@@ -105,13 +108,30 @@ export class HoverPreview {
         return;
       }
 
-      this.show(target.element, target.symbol, target.lineHint);
+      this.scheduleShow(target, event);
+    });
+
+    this.plugin.registerDomEvent(document, "mousemove", (event) => {
+      if (this.pendingTarget && this.hoverLoaderEl) {
+        this.positionHoverLoader(event);
+      }
     });
 
     this.plugin.registerDomEvent(document, "mouseout", (event) => {
       const relatedTarget = event.relatedTarget as Node | null;
       const target = event.target as Node | null;
-      if (!target || !this.popoverEl) {
+      if (!target) {
+        return;
+      }
+
+      if (this.pendingTarget?.element.contains(target)) {
+        if (!relatedTarget || !this.pendingTarget.element.contains(relatedTarget)) {
+          this.clearPendingShow();
+        }
+        return;
+      }
+
+      if (!this.popoverEl) {
         return;
       }
 
@@ -126,6 +146,37 @@ export class HoverPreview {
 
       this.scheduleHide();
     });
+  }
+
+  private scheduleShow(target: StockHoverTarget, event: MouseEvent): void {
+    this.clearHideTimer();
+
+    if (this.popoverEl && this.activeSymbol === target.symbol) {
+      return;
+    }
+
+    if (this.pendingTarget?.element === target.element && this.pendingTarget.symbol === target.symbol) {
+      this.positionHoverLoader(event);
+      return;
+    }
+
+    this.clearPendingShow();
+
+    const delay = normalizeHoverDelay(this.data.settings.hoverPreviewDelayMs);
+    if (delay === 0) {
+      this.show(target.element, target.symbol, target.lineHint);
+      return;
+    }
+
+    this.pendingTarget = target;
+    this.showHoverLoader(event, delay);
+    this.showTimer = window.setTimeout(() => {
+      const pendingTarget = this.pendingTarget;
+      this.clearPendingShow();
+      if (pendingTarget) {
+        this.show(pendingTarget.element, pendingTarget.symbol, pendingTarget.lineHint);
+      }
+    }, delay);
   }
 
   private show(targetEl: HTMLElement, symbol: string, lineHint: number | null): void {
@@ -550,7 +601,40 @@ export class HoverPreview {
     }
   }
 
+  private clearPendingShow(): void {
+    if (this.showTimer !== null) {
+      window.clearTimeout(this.showTimer);
+      this.showTimer = null;
+    }
+
+    this.pendingTarget = null;
+    this.hoverLoaderEl?.remove();
+    this.hoverLoaderEl = null;
+  }
+
+  private showHoverLoader(event: MouseEvent, delay: number): void {
+    this.hoverLoaderEl?.remove();
+    this.hoverLoaderEl = document.body.createDiv({ cls: "stock-note-hover-loader" });
+    this.hoverLoaderEl.style.setProperty("--stock-note-hover-delay", `${delay}ms`);
+    const ball = this.hoverLoaderEl.createDiv({ cls: "stock-note-hover-loader-ball" });
+    ball.createDiv({ cls: "stock-note-hover-loader-fill" });
+    this.positionHoverLoader(event);
+  }
+
+  private positionHoverLoader(event: MouseEvent): void {
+    if (!this.hoverLoaderEl) {
+      return;
+    }
+
+    const margin = 8;
+    const left = Math.min(window.innerWidth - 28 - margin, event.clientX + 12);
+    const top = Math.min(window.innerHeight - 28 - margin, event.clientY + 12);
+    this.hoverLoaderEl.style.left = `${Math.max(margin, left)}px`;
+    this.hoverLoaderEl.style.top = `${Math.max(margin, top)}px`;
+  }
+
   private removePopover(): void {
+    this.clearPendingShow();
     if (this.activeKeydownHandler) {
       document.removeEventListener("keydown", this.activeKeydownHandler, true);
       this.activeKeydownHandler = null;
@@ -560,6 +644,14 @@ export class HoverPreview {
     this.popoverEl?.remove();
     this.popoverEl = null;
   }
+}
+
+function normalizeHoverDelay(value: number): number {
+  if (!Number.isFinite(value) || value < 0) {
+    return 300;
+  }
+
+  return Math.min(5000, Math.floor(value));
 }
 
 type StockNoteIcon =
@@ -794,7 +886,16 @@ function getAssetTypeFromSymbol(symbol: string): AssetType {
     return "fund";
   }
 
+  if (isEtfSymbol(normalized)) {
+    return "etf";
+  }
+
   return "stock";
+}
+
+function isEtfSymbol(symbol: string): boolean {
+  const code = symbol.slice(2);
+  return /^(15|51|56|58)\d{4}$/.test(code);
 }
 
 function normalizeMarketChartPeriod(period: string): ChartPeriod {

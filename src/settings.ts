@@ -41,7 +41,7 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("启用悬浮图表")
-      .setDesc("鼠标移入股票或场外基金链接时展示预览卡片。")
+      .setDesc("鼠标移入股票、ETF 或场外基金链接时展示预览卡片。")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.data.settings.enableHoverPreview)
@@ -64,8 +64,26 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("悬停显示延迟")
+      .setDesc("鼠标停留多久后显示预览卡片，单位毫秒。默认 300，设为 0 可立即显示。")
+      .addText((text) =>
+        text
+          .setPlaceholder("300")
+          .setValue(String(this.plugin.data.settings.hoverPreviewDelayMs))
+          .onChange(async (value) => {
+            const delay = Number.parseInt(value, 10);
+            if (!Number.isFinite(delay) || delay < 0) {
+              return;
+            }
+
+            this.plugin.data.settings.hoverPreviewDelayMs = Math.min(5000, delay);
+            await this.plugin.savePluginData();
+          })
+      );
+
+    new Setting(containerEl)
       .setName("默认图表周期")
-      .setDesc("股票悬浮预览默认展示的图片周期。场外基金默认展示净值走势。")
+      .setDesc("股票和 ETF 悬浮预览默认展示的图片周期。场外基金默认展示净值走势。")
       .addDropdown((dropdown) => {
         Object.entries(PERIOD_OPTIONS).forEach(([value, label]) => dropdown.addOption(value, label));
         dropdown
@@ -80,7 +98,7 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Tushare Token")
-      .setDesc("可选。填写后刷新 A 股列表会优先使用 Tushare stock_basic；场外基金使用天天基金公开数据。")
+      .setDesc("可选。填写后刷新 A 股列表会优先使用 Tushare stock_basic；ETF 和场外基金使用东方财富/天天基金公开数据。")
       .addText((text) =>
         text
           .setPlaceholder("留空使用东方财富")
@@ -93,7 +111,7 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("自动更新标的列表")
-      .setDesc("启动时按刷新周期后台检查股票和场外基金列表。")
+      .setDesc("启动时按刷新周期后台检查股票、ETF 和场外基金列表。")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.data.settings.autoUpdateStockList)

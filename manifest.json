@@ -1,9 +1,9 @@
 {
   "id": "investment-notes",
   "name": "Investment Notes",
-  "version": "0.2.1",
+  "version": "0.2.4",
   "minAppVersion": "1.5.0",
-  "description": "A-share and mutual fund search with hover chart previews for investment notes.",
+  "description": "A-share, ETF, and mutual fund search with hover chart previews for investment notes.",
   "author": "",
   "authorUrl": "",
   "isDesktopOnly": false

@@ -220,7 +220,16 @@ function paragraphContainsSymbol(lines: string[], paragraph: { start: number; en
     return new RegExp(`https?:\\/\\/fund\\.eastmoney\\.com\\/${escapeRegExp(code)}(?:\\.html)?(?:[^\\w]|$)`, "i").test(text);
   }
 
-  return new RegExp(`https?:\\/\\/xueqiu\\.com\\/S\\/${escapeRegExp(symbol)}(?:[^\\w]|$)`, "i").test(text);
+  const code = symbol.slice(2);
+  return (
+    new RegExp(`https?:\\/\\/xueqiu\\.com\\/S\\/${escapeRegExp(symbol)}(?:[^\\w]|$)`, "i").test(text) ||
+    (isEtfCode(code) &&
+      new RegExp(`https?:\\/\\/fund\\.eastmoney\\.com\\/${escapeRegExp(code)}(?:\\.html)?(?:[^\\w]|$)`, "i").test(text))
+  );
+}
+
+function isEtfCode(code: string): boolean {
+  return /^(15|51|56|58)\d{4}$/.test(code);
 }
 
 function formatSnapshotTimestamp(date: Date): string {

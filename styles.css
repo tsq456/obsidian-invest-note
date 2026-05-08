@@ -33,6 +33,57 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   cursor: pointer;
 }
 
+.stock-note-hover-loader {
+  position: fixed;
+  z-index: var(--layer-popover, 30);
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  pointer-events: none;
+}
+
+.stock-note-hover-loader-ball {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  overflow: hidden;
+  border: 1px solid var(--interactive-accent);
+  border-radius: 50%;
+  background: var(--background-primary);
+  box-shadow:
+    0 0 0 3px var(--background-primary),
+    inset 0 1px 2px rgba(255, 255, 255, 0.35),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.stock-note-hover-loader-ball::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  width: 5px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.stock-note-hover-loader-fill {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 0;
+  background: var(--interactive-accent);
+  animation: stock-note-hover-fill var(--stock-note-hover-delay, 300ms) linear forwards;
+}
+
+@keyframes stock-note-hover-fill {
+  to {
+    height: 100%;
+  }
+}
+
 .stock-note-popover {
   position: fixed;
   z-index: var(--layer-popover, 30);

@@ -1,5 +1,5 @@
 export type StockMarket = "SH" | "SZ" | "BJ";
-export type AssetType = "stock" | "fund";
+export type AssetType = "stock" | "etf" | "fund";
 export type ChartPeriod = "min" | "daily" | "weekly" | "monthly" | "netWorth" | "accWorth";
 
 export type InvestmentAsset = {
@@ -38,6 +38,7 @@ export type InvestmentNotesSettings = {
   defaultChartPeriod: ChartPeriod;
   enableHoverPreview: boolean;
   enableSourceHoverPreview: boolean;
+  hoverPreviewDelayMs: number;
   linkTextColor: string;
   linkBackgroundColor: string;
   linkBorderColor: string;
@@ -59,6 +60,7 @@ export const DEFAULT_SETTINGS: InvestmentNotesSettings = {
   defaultChartPeriod: "min",
   enableHoverPreview: true,
   enableSourceHoverPreview: true,
+  hoverPreviewDelayMs: 300,
   linkTextColor: "#d14b3f",
   linkBackgroundColor: "rgba(209, 75, 63, 0.08)",
   linkBorderColor: "rgba(209, 75, 63, 0.24)",

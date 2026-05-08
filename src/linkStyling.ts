@@ -107,5 +107,14 @@ function getAssetTypeFromSymbol(symbol: string): string {
     return "fund";
   }
 
+  if (isEtfSymbol(symbol)) {
+    return "etf";
+  }
+
   return "stock";
+}
+
+function isEtfSymbol(symbol: string): boolean {
+  const code = symbol.slice(2);
+  return /^(15|51|56|58)\d{4}$/.test(code);
 }

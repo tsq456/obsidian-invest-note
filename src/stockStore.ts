@@ -14,8 +14,10 @@ const EASTMONEY_MARKET_FILTERS = [
   "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
   "m:0+t:81+s:2048"
 ];
+const EASTMONEY_ETF_FILTER = "b:MK0021,b:MK0022,b:MK0023,b:MK0024";
 const TUSHARE_API_URL = "https://api.tushare.pro";
 const EASTMONEY_FUND_CODE_URL = "https://fund.eastmoney.com/js/fundcode_search.js";
+const ASSET_CACHE_SOURCE_VERSION = "investment-assets-v2";
 const EMBEDDED_SEED_STOCKS = seedStocks as Array<Partial<InvestmentAsset> & Pick<InvestmentAsset, "code" | "market" | "name" | "symbol" | "sina" | "xueqiu" | "pinyin" | "abbr">>;
 
 type EastMoneyDiffItem = {
@@ -100,7 +102,7 @@ export class StockStore {
       this.data.assetCache = {
         assets: remoteAssets,
         updatedAt: Date.now(),
-        sourceVersion: "investment-assets-v1"
+        sourceVersion: ASSET_CACHE_SOURCE_VERSION
       };
       this.data.stockCache = null;
       await this.persist();
@@ -155,6 +157,12 @@ export class StockStore {
       groups.push(await this.fetchRemoteStocks());
     } catch (error) {
       errors.push(`股票: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    try {
+      groups.push(await this.fetchEastMoneyEtfs());
+    } catch (error) {
+      errors.push(`ETF: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     try {
@@ -253,10 +261,24 @@ export class StockStore {
     return dedupeAssets(allStocks);
   }
 
+  private async fetchEastMoneyEtfs(): Promise<InvestmentAsset[]> {
+    const errors: string[] = [];
+
+    for (const host of EASTMONEY_HOSTS) {
+      try {
+        return dedupeAssets(await this.fetchEastMoneyAssetsByMarket(host, EASTMONEY_ETF_FILTER, "etf"));
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    throw new Error(errors.join(" | "));
+  }
+
   private async fetchEastMoneyAssetsByMarket(
     host: string,
     marketFilter: string,
-    assetType: "stock"
+    assetType: "stock" | "etf"
   ): Promise<InvestmentAsset[]> {
     const assets: InvestmentAsset[] = [];
     let total = Number.POSITIVE_INFINITY;
@@ -303,6 +325,11 @@ export class StockStore {
   private async fetchEastMoneyFunds(): Promise<InvestmentAsset[]> {
     const rows = await this.fetchEastMoneyFundCodeRows();
     const funds = rows
+      .filter((row) => {
+        const code = typeof row[0] === "string" ? row[0].trim() : "";
+        const name = typeof row[2] === "string" ? row[2].trim() : "";
+        return !isExchangeTradedEtf(code, name);
+      })
       .map((row) => normalizeEastMoneyFund(row))
       .filter((asset): asset is InvestmentAsset => asset !== null);
     if (funds.length === 0) {
@@ -350,7 +377,7 @@ function normalizeTushareStock(fields: string[], item: unknown[]): InvestmentAss
   return buildAssetInfo("stock", code, market, name);
 }
 
-function normalizeEastMoneyAsset(item: EastMoneyDiffItem, assetType: "stock"): InvestmentAsset | null {
+function normalizeEastMoneyAsset(item: EastMoneyDiffItem, assetType: "stock" | "etf"): InvestmentAsset | null {
   const code = item.f12?.trim();
   const name = item.f14?.trim();
   if (!code || !name || !/^\d{6}$/.test(code)) {
@@ -390,7 +417,7 @@ function normalizeEastMoneyFund(row: unknown[]): InvestmentAsset | null {
   };
 }
 
-function buildAssetInfo(assetType: "stock", code: string, market: StockMarket, name: string): InvestmentAsset {
+function buildAssetInfo(assetType: "stock" | "etf", code: string, market: StockMarket, name: string): InvestmentAsset {
   const symbol = `${market}${code}`;
 
   return {
@@ -411,6 +438,11 @@ function normalizeCachedAssets(assets: Array<Partial<InvestmentAsset> & Pick<Inv
   return assets
     .map((asset) => {
       if (asset.symbol.startsWith("OF") || asset.assetType === "fund" || asset.market === "OF") {
+        const etfMarket = inferEtfMarket(asset.code);
+        if (etfMarket && isExchangeTradedEtf(asset.code, asset.name)) {
+          return buildAssetInfo("etf", asset.code, etfMarket, asset.name);
+        }
+
         return normalizeEastMoneyFund([
           asset.code,
           asset.abbr ?? "",
@@ -426,11 +458,11 @@ function normalizeCachedAssets(assets: Array<Partial<InvestmentAsset> & Pick<Inv
       }
 
       const cachedAssetType: string = typeof asset.assetType === "string" ? asset.assetType : "stock";
-      if (cachedAssetType === "listedFund" || cachedAssetType === "etf") {
+      if (cachedAssetType === "listedFund") {
         return null;
       }
 
-      return buildAssetInfo("stock", asset.code, market, asset.name);
+      return buildAssetInfo(cachedAssetType === "etf" ? "etf" : "stock", asset.code, market, asset.name);
     })
     .filter((asset): asset is InvestmentAsset => asset !== null);
 }
@@ -484,6 +516,26 @@ function inferMarket(code: string, eastMoneyMarket?: number): StockMarket | null
 
   if (code.startsWith("4") || code.startsWith("8") || code.startsWith("9")) {
     return "BJ";
+  }
+
+  return null;
+}
+
+function isExchangeTradedEtf(code: string, name: string): boolean {
+  if (!/^\d{6}$/.test(code) || !/ETF/i.test(name) || /联接/.test(name)) {
+    return false;
+  }
+
+  return /^(15|51|56|58)\d{4}$/.test(code);
+}
+
+function inferEtfMarket(code: string): StockMarket | null {
+  if (/^15\d{4}$/.test(code)) {
+    return "SZ";
+  }
+
+  if (/^(51|56|58)\d{4}$/.test(code)) {
+    return "SH";
   }
 
   return null;
@@ -569,7 +621,13 @@ export function getAssetSymbolFromHref(href: string): string | null {
   }
 
   const fundMatch = href.match(/https?:\/\/fund\.eastmoney\.com\/(\d{6})(?:\.html)?/i);
-  return fundMatch ? `OF${fundMatch[1]}` : null;
+  if (!fundMatch) {
+    return null;
+  }
+
+  const code = fundMatch[1];
+  const etfMarket = inferEtfMarket(code);
+  return etfMarket ? `${etfMarket}${code}` : `OF${code}`;
 }
 
 export function getXueqiuSymbolFromHref(href: string): string | null {
