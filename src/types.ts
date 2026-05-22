@@ -2,6 +2,47 @@ export type StockMarket = "SH" | "SZ" | "BJ";
 export type AssetType = "stock" | "etf" | "fund";
 export type ChartPeriod = "min" | "daily" | "weekly" | "monthly" | "netWorth" | "accWorth";
 
+export type MarketKlineBar = {
+  date: string;
+  open: number;
+  close: number;
+  high: number;
+  low: number;
+  volume: number;
+  amount: number;
+  amplitude: number | null;
+  changePercent: number | null;
+  changeAmount: number | null;
+  turnover: number | null;
+};
+
+export type MarketTrendPoint = {
+  time: string;
+  open: number;
+  close: number;
+  high: number;
+  low: number;
+  volume: number;
+  amount: number;
+  average: number | null;
+};
+
+export type MarketChartData =
+  | {
+      kind: "intraday";
+      symbol: string;
+      name: string;
+      preClose: number | null;
+      points: MarketTrendPoint[];
+    }
+  | {
+      kind: "kline";
+      symbol: string;
+      name: string;
+      period: Exclude<ChartPeriod, "min" | "netWorth" | "accWorth">;
+      bars: MarketKlineBar[];
+    };
+
 export type InvestmentAsset = {
   assetType: AssetType;
   code: string;

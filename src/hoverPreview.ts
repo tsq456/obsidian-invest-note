@@ -9,7 +9,9 @@ import {
   type AnnotationTool
 } from "./chartAnnotation";
 import { copyChartSnapshotToClipboard, insertChartSnapshotBelowStockParagraph } from "./chartSnapshot";
+import { createInteractiveMarketChart, type InteractiveMarketChart } from "./interactiveChart";
 import type InvestmentNotesPlugin from "./main";
+import { fetchMarketChartData } from "./marketData";
 import { getAssetChartUrl, getAssetSymbolFromHref } from "./stockStore";
 import type { AssetType, ChartPeriod, InvestmentNotesData } from "./types";
 
@@ -26,6 +28,8 @@ const FUND_CHART_PERIODS: Array<{ value: ChartPeriod; label: string }> = [
 const DEFAULT_PERIOD: ChartPeriod = "min";
 const DEFAULT_FUND_PERIOD: ChartPeriod = "netWorth";
 const TEXT_FONT_STEP = 2;
+const INTRADAY_REFRESH_MS = 15000;
+const KLINE_REFRESH_MS = 60000;
 
 type QuoteSnapshot = {
   date: string;
@@ -85,6 +89,8 @@ export class HoverPreview {
   private annotationFontSize = DEFAULT_TEXT_FONT_SIZE;
   private activeLineHint: number | null = null;
   private activeKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
+  private interactiveChart: InteractiveMarketChart | null = null;
+  private chartRefreshTimer: number | null = null;
   private readonly quoteCache = new Map<string, QuoteSnapshot>();
   private readonly fundQuoteCache = new Map<string, FundQuoteSnapshot>();
 
@@ -219,13 +225,14 @@ export class HoverPreview {
         this.activePeriod = period.value;
         periodControls.querySelectorAll(".stock-note-period-tab").forEach((el) => el.removeClass("is-active"));
         button.addClass("is-active");
-        this.renderChart(symbol, imageWrap);
+        void this.renderChart(symbol, imageWrap);
       });
     });
 
-    this.renderSnapshotControls(actions, symbol);
-    this.renderAnnotationControls(actions);
-    this.renderChart(symbol, imageWrap);
+    if (assetType === "fund") {
+      this.renderSnapshotControls(actions, symbol);
+    }
+    void this.renderChart(symbol, imageWrap);
 
     popover.addEventListener("mouseenter", () => this.clearHideTimer());
     popover.addEventListener("mouseleave", () => this.scheduleHide());
@@ -332,12 +339,31 @@ export class HoverPreview {
     }
   }
 
-  private renderChart(symbol: string, imageWrap: HTMLElement): void {
+  private async renderChart(symbol: string, imageWrap: HTMLElement): Promise<void> {
+    this.clearChartResources();
     this.annotationController?.destroy();
     this.annotationController = null;
     imageWrap.empty();
     const loading = imageWrap.createDiv({ cls: "stock-note-popover-loading", text: "图表加载中..." });
     const period = this.activePeriod;
+
+    if (getAssetTypeFromSymbol(symbol) !== "fund") {
+      const chartEl = imageWrap.createDiv({ cls: "stock-note-interactive-chart" });
+      try {
+        const chart = createInteractiveMarketChart(chartEl);
+        this.interactiveChart = chart;
+        await this.updateInteractiveChart(symbol, period, chart, imageWrap, loading);
+        this.chartRefreshTimer = window.setInterval(() => {
+          void this.updateInteractiveChart(symbol, period, chart, imageWrap, loading, true);
+        }, period === "min" ? INTRADAY_REFRESH_MS : KLINE_REFRESH_MS);
+      } catch (error) {
+        console.warn("[investment-notes] Failed to render interactive chart", error);
+        chartEl.remove();
+        loading.setText("图表暂不可用");
+      }
+      return;
+    }
+
     const chartUrl = getAssetChartUrl(symbol, this.activePeriod);
     if (!chartUrl) {
       loading.setText("图表暂不可用");
@@ -375,6 +401,31 @@ export class HoverPreview {
     img.addEventListener("error", () => {
       loading.setText("图表暂不可用");
     });
+  }
+
+  private async updateInteractiveChart(
+    symbol: string,
+    period: ChartPeriod,
+    chart: InteractiveMarketChart,
+    imageWrap: HTMLElement,
+    loading: HTMLElement,
+    silent = false
+  ): Promise<void> {
+    try {
+      const data = await fetchMarketChartData(symbol, period);
+      if (symbol !== this.activeSymbol || period !== this.activePeriod || !imageWrap.isConnected) {
+        return;
+      }
+
+      chart.update(data, period);
+      chart.resize();
+      loading.hide();
+    } catch (error) {
+      console.warn("[investment-notes] Failed to update interactive chart", error);
+      if (!silent) {
+        loading.setText("图表暂不可用");
+      }
+    }
   }
 
   private renderSnapshotControls(actions: HTMLElement, symbol: string): void {
@@ -635,6 +686,7 @@ export class HoverPreview {
 
   private removePopover(): void {
     this.clearPendingShow();
+    this.clearChartResources();
     if (this.activeKeydownHandler) {
       document.removeEventListener("keydown", this.activeKeydownHandler, true);
       this.activeKeydownHandler = null;
@@ -643,6 +695,16 @@ export class HoverPreview {
     this.annotationController = null;
     this.popoverEl?.remove();
     this.popoverEl = null;
+  }
+
+  private clearChartResources(): void {
+    if (this.chartRefreshTimer !== null) {
+      window.clearInterval(this.chartRefreshTimer);
+      this.chartRefreshTimer = null;
+    }
+
+    this.interactiveChart?.dispose();
+    this.interactiveChart = null;
   }
 }
 

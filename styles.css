@@ -204,6 +204,12 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   background: var(--background-secondary);
 }
 
+.stock-note-interactive-chart {
+  width: 100%;
+  height: 320px;
+  min-width: 0;
+}
+
 .stock-note-chart-frame {
   position: relative;
   display: inline-block;
