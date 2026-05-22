@@ -45,6 +45,7 @@ function buildIntradayOption(data: Extract<MarketChartData, { kind: "intraday" }
     animation: false,
     color: ["#d14b3f", "#d99a20"],
     tooltip: {
+      ...buildBoundedTooltip(),
       trigger: "axis",
       axisPointer: { type: "cross" },
       formatter(params) {
@@ -141,6 +142,7 @@ function buildKlineOption(
       data: MA_SERIES.map((item) => item.name)
     },
     tooltip: {
+      ...buildBoundedTooltip(),
       trigger: "axis",
       axisPointer: { type: "cross" },
       formatter(params) {
@@ -238,6 +240,30 @@ function buildCategoryAxis(data: string[], showLabel: boolean): echarts.XAXisCom
     splitLine: { show: false },
     min: "dataMin",
     max: "dataMax"
+  };
+}
+
+function buildBoundedTooltip(): echarts.TooltipComponentOption {
+  return {
+    confine: true,
+    appendToBody: false,
+    extraCssText: "max-width: 220px; white-space: nowrap;",
+    position(point, _params, _dom, _rect, size) {
+      const margin = 8;
+      const [mouseX, mouseY] = point;
+      const viewWidth = size.viewSize[0];
+      const viewHeight = size.viewSize[1];
+      const boxWidth = size.contentSize[0];
+      const boxHeight = size.contentSize[1];
+      const rightX = mouseX + 14;
+      const leftX = mouseX - boxWidth - 14;
+      const x = rightX + boxWidth + margin <= viewWidth ? rightX : Math.max(margin, leftX);
+      const lowerY = mouseY + 14;
+      const upperY = mouseY - boxHeight - 14;
+      const y = upperY >= margin ? upperY : Math.min(Math.max(margin, lowerY), viewHeight - boxHeight - margin);
+
+      return [x, y];
+    }
   };
 }
 
