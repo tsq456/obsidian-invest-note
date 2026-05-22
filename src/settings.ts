@@ -1,6 +1,6 @@
 import { Notice, PluginSettingTab, Setting } from "obsidian";
 import type InvestmentNotesPlugin from "./main";
-import type { ChartPeriod } from "./types";
+import type { ChartPeriod, HoverCardWidth } from "./types";
 
 const PERIOD_OPTIONS: Partial<Record<ChartPeriod, string>> = {
   min: "分时",
@@ -80,6 +80,21 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
             }
 
             this.plugin.data.settings.hoverPreviewDelayMs = Math.min(5000, delay);
+            await this.plugin.savePluginData();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("悬浮卡片大小")
+      .setDesc("控制行情预览卡片宽度，窄卡片会自动压缩指标列和操作区。")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("400", "400 px")
+          .addOption("700", "700 px")
+          .addOption("1000", "1000 px")
+          .setValue(String(this.plugin.data.settings.hoverCardWidth ?? 700))
+          .onChange(async (value) => {
+            this.plugin.data.settings.hoverCardWidth = Number(value) as HoverCardWidth;
             await this.plugin.savePluginData();
           })
       );

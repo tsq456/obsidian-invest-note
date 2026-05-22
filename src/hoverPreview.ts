@@ -13,7 +13,7 @@ import { createInteractiveMarketChart, type InteractiveMarketChart } from "./int
 import type InvestmentNotesPlugin from "./main";
 import { fetchMarketChartData } from "./marketData";
 import { getAssetSymbolFromHref } from "./stockStore";
-import type { AssetType, ChartPeriod, InvestmentNotesData } from "./types";
+import type { AssetType, ChartPeriod, HoverCardWidth, InvestmentNotesData } from "./types";
 
 const CHART_PERIODS: Array<{ value: ChartPeriod; label: string }> = [
   { value: "min", label: "分时" },
@@ -188,7 +188,10 @@ export class HoverPreview {
     this.annotationFontSize = DEFAULT_TEXT_FONT_SIZE;
     this.activeLineHint = lineHint;
 
+    const cardWidth = normalizeHoverCardWidth(this.data.settings.hoverCardWidth);
     const popover = document.body.createDiv({ cls: "stock-note-popover" });
+    popover.setAttribute("data-card-width", String(cardWidth));
+    popover.style.setProperty("--stock-note-popover-width", `${cardWidth}px`);
     const header = popover.createDiv({ cls: "stock-note-popover-header" });
     this.renderDisplayTitle(header, symbol);
     const timeEl = header.createSpan({
@@ -637,6 +640,14 @@ function normalizeHoverDelay(value: number): number {
   }
 
   return Math.min(5000, Math.floor(value));
+}
+
+function normalizeHoverCardWidth(value: number): HoverCardWidth {
+  if (value === 400 || value === 700 || value === 1000) {
+    return value;
+  }
+
+  return 700;
 }
 
 function formatErrorMessage(error: unknown): string {

@@ -66,8 +66,8 @@ function buildIntradayOption(data: Extract<MarketChartData, { kind: "intraday" }
     },
     axisPointer: { link: [{ xAxisIndex: "all" }] },
     grid: [
-      { left: 48, right: 12, top: 18, height: 182 },
-      { left: 48, right: 12, top: 230, height: 48 }
+      { left: 48, right: 12, top: 18, height: "58%" },
+      { left: 48, right: 12, top: "76%", height: "14%" }
     ],
     xAxis: [
       buildCategoryAxis(times, false),
@@ -166,8 +166,8 @@ function buildKlineOption(
     },
     axisPointer: { link: [{ xAxisIndex: "all" }] },
     grid: [
-      { left: 48, right: 12, top: 34, height: 166 },
-      { left: 48, right: 12, top: 230, height: 48 }
+      { left: 48, right: 12, top: 34, height: "52%" },
+      { left: 48, right: 12, top: "74%", height: "14%" }
     ],
     xAxis: [
       buildCategoryAxis(dates, false),

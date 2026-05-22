@@ -85,17 +85,28 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 }
 
 .stock-note-popover {
+  --stock-note-popover-width: 700px;
+  --stock-note-popover-padding: 24px;
+  --stock-note-chart-height: 320px;
   position: fixed;
   z-index: var(--layer-popover, 30);
-  width: min(896px, calc(100vw - 24px));
-  min-height: 520px;
-  padding: 24px;
+  width: min(var(--stock-note-popover-width), calc(100vw - 24px));
+  padding: var(--stock-note-popover-padding);
   border: 0;
   border-radius: 16px;
   background: #ffffff;
   box-shadow:
     0 10px 15px rgba(0, 0, 0, 0.10),
     0 4px 6px rgba(0, 0, 0, 0.10);
+}
+
+.stock-note-popover[data-card-width="400"] {
+  --stock-note-popover-padding: 16px;
+  --stock-note-chart-height: 300px;
+}
+
+.stock-note-popover[data-card-width="1000"] {
+  --stock-note-chart-height: 340px;
 }
 
 .stock-note-popover-header {
@@ -135,6 +146,18 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   white-space: nowrap;
 }
 
+.stock-note-popover[data-card-width="400"] .stock-note-popover-header {
+  align-items: flex-start;
+  height: auto;
+}
+
+.stock-note-popover[data-card-width="400"] .stock-note-popover-name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .stock-note-quote-section {
   margin-top: 4px;
 }
@@ -144,7 +167,7 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   align-items: baseline;
   gap: 8px;
   min-width: 0;
-  height: 40px;
+  min-height: 40px;
   margin-bottom: 16px;
 }
 
@@ -165,6 +188,18 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   white-space: nowrap;
 }
 
+.stock-note-popover[data-card-width="400"] .stock-note-price-summary {
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-bottom: 14px;
+}
+
+.stock-note-popover[data-card-width="400"] .stock-note-price-current {
+  width: 100%;
+  font-size: 32px;
+  line-height: 36px;
+}
+
 .stock-note-change-up {
   color: #fb2c36;
 }
@@ -181,6 +216,12 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   height: 28px;
   margin-top: 16px;
   margin-bottom: 16px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.stock-note-period-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .stock-note-period-tab {
@@ -204,12 +245,21 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 
 .stock-note-quote-row {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
+}
+
+.stock-note-popover[data-card-width="400"] .stock-note-quote-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+
+.stock-note-popover[data-card-width="1000"] .stock-note-quote-row {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .stock-note-quote-item {
@@ -237,7 +287,7 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   display: grid;
   place-items: center;
   width: 100%;
-  min-height: 320px;
+  min-height: var(--stock-note-chart-height);
   overflow: hidden;
   border-radius: 0;
   background: #f8fafc;
@@ -245,7 +295,7 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 
 .stock-note-interactive-chart {
   width: 100%;
-  height: 320px;
+  height: var(--stock-note-chart-height);
   min-width: 0;
 }
 
@@ -433,7 +483,7 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   }
 
   .stock-note-price-change {
-    font-size: 20px;
+    font-size: 14px;
   }
 
   .stock-note-quote-row {
