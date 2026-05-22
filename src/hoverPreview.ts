@@ -40,6 +40,8 @@ type QuoteSnapshot = {
   changePercent: number | null;
   volume: number | null;
   amount: number | null;
+  volumeRatio: number | null;
+  turnover: number | null;
 };
 
 type EastMoneyQuoteResponse = {
@@ -54,6 +56,8 @@ type EastMoneyQuoteResponse = {
     f169?: number;
     f170?: number;
     f86?: number;
+    f50?: number;
+    f168?: number;
   };
 };
 
@@ -186,13 +190,14 @@ export class HoverPreview {
 
     const popover = document.body.createDiv({ cls: "stock-note-popover" });
     const header = popover.createDiv({ cls: "stock-note-popover-header" });
-    header.createSpan({
-      cls: "stock-note-popover-symbol",
-      text: this.getDisplayTitle(symbol)
+    this.renderDisplayTitle(header, symbol);
+    const timeEl = header.createSpan({
+      cls: "stock-note-popover-time",
+      text: "--"
     });
 
     const quoteEl = popover.createDiv({ cls: "stock-note-quote-section" });
-    void this.renderQuote(symbol, quoteEl);
+    void this.renderQuote(symbol, quoteEl, timeEl);
 
     const periodControls = popover.createDiv({ cls: "stock-note-period-tabs" });
     const imageWrap = popover.createDiv({ cls: "stock-note-popover-image-wrap" });
@@ -277,7 +282,7 @@ export class HoverPreview {
     }
   }
 
-  private async renderQuote(symbol: string, quoteEl: HTMLElement): Promise<void> {
+  private async renderQuote(symbol: string, quoteEl: HTMLElement, timeEl: HTMLElement): Promise<void> {
     quoteEl.empty();
     quoteEl.createSpan({ cls: "stock-note-quote-loading", text: "行情加载中..." });
 
@@ -288,15 +293,15 @@ export class HoverPreview {
       }
 
       quoteEl.empty();
+      timeEl.setText(quote.date === "-" ? "--" : `${quote.date} 15:00`);
       renderPriceSummary(quoteEl, quote);
       const detailEl = quoteEl.createDiv({ cls: "stock-note-quote-row" });
-      addQuoteItem(detailEl, "日期", quote.date);
-      addQuoteItem(detailEl, "开盘", formatPrice(quote.open), getPriceChangeClass(quote.open, quote.previousClose));
-      addQuoteItem(detailEl, "最高", formatPrice(quote.high), getPriceChangeClass(quote.high, quote.previousClose));
-      addQuoteItem(detailEl, "最低", formatPrice(quote.low), getPriceChangeClass(quote.low, quote.previousClose));
-      addQuoteItem(detailEl, "收盘", formatPrice(quote.close), getPriceChangeClass(quote.close, quote.previousClose));
+      addQuoteItem(detailEl, "开盘价", formatPrice(quote.open), getPriceChangeClass(quote.open, quote.previousClose));
       addQuoteItem(detailEl, "成交量", formatVolumeHands(quote.volume));
-      addQuoteItem(detailEl, "成交额", formatAmount(quote.amount));
+      addQuoteItem(detailEl, "最高", formatPrice(quote.high), getPriceChangeClass(quote.high, quote.previousClose));
+      addQuoteItem(detailEl, "涨幅", formatSignedPercent(quote.changePercent), getValueChangeClass(quote.changePercent));
+      addQuoteItem(detailEl, "量比", formatRatio(quote.volumeRatio));
+      addQuoteItem(detailEl, "换手", formatPercent(quote.turnover));
     } catch (error) {
       console.warn("[investment-notes] Failed to load quote snapshot", error);
       if (symbol === this.activeSymbol) {
@@ -497,10 +502,13 @@ export class HoverPreview {
     return quote;
   }
 
-  private getDisplayTitle(symbol: string): string {
+  private renderDisplayTitle(parent: HTMLElement, symbol: string): void {
     const asset = this.plugin.stockStore.getBySymbol(symbol);
-    const code = toDisplayCode(symbol);
-    return asset ? `${asset.name}（${code}）` : code;
+    const title = parent.createSpan({ cls: "stock-note-popover-symbol" });
+    title.createSpan({ cls: "stock-note-popover-name", text: asset?.name ?? toDisplayCode(symbol) });
+    if (asset) {
+      title.createSpan({ cls: "stock-note-popover-code", text: toDisplayCode(symbol) });
+    }
   }
 
   private positionPopover(targetEl: HTMLElement, popover: HTMLElement): void {
@@ -708,7 +716,7 @@ async function fetchQuoteSnapshot(symbol: string): Promise<QuoteSnapshot> {
   }
 
   const response = await requestUrl({
-    url: `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fields=f43,f44,f45,f46,f47,f48,f60,f86,f169,f170`,
+    url: `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fields=f43,f44,f45,f46,f47,f48,f50,f60,f86,f168,f169,f170`,
     method: "GET",
     headers: {
       Accept: "application/json,text/plain,*/*",
@@ -731,7 +739,9 @@ async function fetchQuoteSnapshot(symbol: string): Promise<QuoteSnapshot> {
     changeAmount: toNullableNumber(data.f169),
     changePercent: toNullableNumber(data.f170),
     volume: toNullableNumber(data.f47),
-    amount: toNullableNumber(data.f48)
+    amount: toNullableNumber(data.f48),
+    volumeRatio: toNullableNumber(data.f50),
+    turnover: toNullableNumber(data.f168)
   };
 }
 
@@ -853,6 +863,18 @@ function formatSignedPercent(value: number | null): string {
   }
 
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function formatPercent(value: number | null): string {
+  if (value === null) {
+    return "-";
+  }
+
+  return `${value.toFixed(2)}%`;
+}
+
+function formatRatio(value: number | null): string {
+  return value === null ? "-" : value.toFixed(2);
 }
 
 function formatVolumeHands(value: number | null): string {
