@@ -65,7 +65,6 @@ export class StockSuggest extends EditorSuggest<InvestmentAsset> {
 
 function getAssetTypeLabel(asset: InvestmentAsset): string {
   if (asset.assetType === "etf") return "ETF";
-  if (asset.assetType === "fund") return "场外基金";
   return "股票";
 }
 

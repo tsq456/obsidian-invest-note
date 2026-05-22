@@ -16,7 +16,6 @@ const EASTMONEY_MARKET_FILTERS = [
 ];
 const EASTMONEY_ETF_FILTER = "b:MK0021,b:MK0022,b:MK0023,b:MK0024";
 const TUSHARE_API_URL = "https://api.tushare.pro";
-const EASTMONEY_FUND_CODE_URL = "https://fund.eastmoney.com/js/fundcode_search.js";
 const ASSET_CACHE_SOURCE_VERSION = "investment-assets-v2";
 const EMBEDDED_SEED_STOCKS = seedStocks as Array<Partial<InvestmentAsset> & Pick<InvestmentAsset, "code" | "market" | "name" | "symbol" | "sina" | "xueqiu" | "pinyin" | "abbr">>;
 
@@ -163,12 +162,6 @@ export class StockStore {
       groups.push(await this.fetchEastMoneyEtfs());
     } catch (error) {
       errors.push(`ETF: ${error instanceof Error ? error.message : String(error)}`);
-    }
-
-    try {
-      groups.push(await this.fetchEastMoneyFunds());
-    } catch (error) {
-      errors.push(`场外基金: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     const assets = dedupeAssets(groups.flat());
@@ -322,39 +315,6 @@ export class StockStore {
     return assets;
   }
 
-  private async fetchEastMoneyFunds(): Promise<InvestmentAsset[]> {
-    const rows = await this.fetchEastMoneyFundCodeRows();
-    const funds = rows
-      .filter((row) => {
-        const code = typeof row[0] === "string" ? row[0].trim() : "";
-        const name = typeof row[2] === "string" ? row[2].trim() : "";
-        return !isExchangeTradedEtf(code, name);
-      })
-      .map((row) => normalizeEastMoneyFund(row))
-      .filter((asset): asset is InvestmentAsset => asset !== null);
-    if (funds.length === 0) {
-      throw new Error("天天基金返回了空基金列表");
-    }
-
-    return funds;
-  }
-  private async fetchEastMoneyFundCodeRows(): Promise<unknown[][]> {
-    const response = await requestUrl({
-      url: EASTMONEY_FUND_CODE_URL,
-      method: "GET",
-      headers: {
-        Accept: "application/javascript,text/plain,*/*",
-        Referer: "https://fund.eastmoney.com/",
-        "User-Agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Obsidian Investment Notes"
-      }
-    });
-    const match = response.text.match(/var\s+r\s*=\s*(\[[\s\S]*\]);?/);
-    if (!match) {
-      throw new Error("天天基金列表格式已变化");
-    }
-
-    return JSON.parse(match[1]) as unknown[][];
-  }
 }
 
 function normalizeTushareStock(fields: string[], item: unknown[]): InvestmentAsset | null {
@@ -392,31 +352,6 @@ function normalizeEastMoneyAsset(item: EastMoneyDiffItem, assetType: "stock" | "
   return buildAssetInfo(assetType, code, market, name);
 }
 
-function normalizeEastMoneyFund(row: unknown[]): InvestmentAsset | null {
-  const code = typeof row[0] === "string" ? row[0].trim() : "";
-  const abbr = typeof row[1] === "string" ? row[1].trim().toLowerCase() : "";
-  const name = typeof row[2] === "string" ? row[2].trim() : "";
-  const category = typeof row[3] === "string" ? row[3].trim() : "";
-  const fullPinyin = typeof row[4] === "string" ? row[4].trim().toLowerCase() : "";
-  if (!/^\d{6}$/.test(code) || !name) {
-    return null;
-  }
-
-  return {
-    assetType: "fund",
-    code,
-    market: "OF",
-    name,
-    symbol: `OF${code}`,
-    sina: "",
-    xueqiu: "",
-    url: `https://fund.eastmoney.com/${code}.html`,
-    pinyin: fullPinyin || toFullPinyin(name),
-    abbr: abbr || toPinyinAbbr(name),
-    category
-  };
-}
-
 function buildAssetInfo(assetType: "stock" | "etf", code: string, market: StockMarket, name: string): InvestmentAsset {
   const symbol = `${market}${code}`;
 
@@ -437,19 +372,9 @@ function buildAssetInfo(assetType: "stock" | "etf", code: string, market: StockM
 function normalizeCachedAssets(assets: Array<Partial<InvestmentAsset> & Pick<InvestmentAsset, "code" | "market" | "name" | "symbol">>): InvestmentAsset[] {
   return assets
     .map((asset) => {
-      if (asset.symbol.startsWith("OF") || asset.assetType === "fund" || asset.market === "OF") {
-        const etfMarket = inferEtfMarket(asset.code);
-        if (etfMarket && isExchangeTradedEtf(asset.code, asset.name)) {
-          return buildAssetInfo("etf", asset.code, etfMarket, asset.name);
-        }
-
-        return normalizeEastMoneyFund([
-          asset.code,
-          asset.abbr ?? "",
-          asset.name,
-          asset.category ?? "",
-          asset.pinyin ?? ""
-        ]);
+      const cachedMarket = String(asset.market);
+      if (asset.symbol.startsWith("OF") || cachedMarket === "OF") {
+        return null;
       }
 
       const market = asset.market === "SH" || asset.market === "SZ" || asset.market === "BJ" ? asset.market : null;
@@ -587,23 +512,8 @@ function toPinyinAbbr(name: string): string {
 
 export function getAssetChartUrl(symbol: string, period: ChartPeriod): string | null {
   const normalized = symbol.toUpperCase();
-  const fundMatch = normalized.match(/^OF(\d{6})$/);
-  if (fundMatch) {
-    if (period === "netWorth") {
-      return `https://j4.dfcfw.com/charts/pic6/${fundMatch[1]}.png`;
-    }
-    if (period === "accWorth") {
-      return `https://j4.dfcfw.com/charts/pic7/${fundMatch[1]}.png`;
-    }
-    return null;
-  }
-
   const match = normalized.match(/^(SH|SZ|BJ)(\d{6})$/);
   if (!match) {
-    return null;
-  }
-
-  if (period === "netWorth" || period === "accWorth") {
     return null;
   }
 
@@ -620,17 +530,9 @@ export function getAssetSymbolFromHref(href: string): string | null {
     return xueqiuMatch[1].toUpperCase();
   }
 
-  const fundMatch = href.match(/https?:\/\/fund\.eastmoney\.com\/(\d{6})(?:\.html)?/i);
-  if (!fundMatch) {
-    return null;
-  }
-
-  const code = fundMatch[1];
-  const etfMarket = inferEtfMarket(code);
-  return etfMarket ? `${etfMarket}${code}` : `OF${code}`;
+  return null;
 }
 
 export function getXueqiuSymbolFromHref(href: string): string | null {
-  const symbol = getAssetSymbolFromHref(href);
-  return symbol && !symbol.startsWith("OF") ? symbol : null;
+  return getAssetSymbolFromHref(href);
 }

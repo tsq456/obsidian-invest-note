@@ -1,5 +1,5 @@
 export type StockMarket = "SH" | "SZ" | "BJ";
-export type AssetType = "stock" | "etf" | "fund";
+export type AssetType = "stock" | "etf";
 export type ChartPeriod =
   | "min"
   | "minute5"
@@ -7,9 +7,7 @@ export type ChartPeriod =
   | "minute60"
   | "daily"
   | "weekly"
-  | "monthly"
-  | "netWorth"
-  | "accWorth";
+  | "monthly";
 
 export type MarketKlineBar = {
   date: string;
@@ -48,14 +46,14 @@ export type MarketChartData =
       kind: "kline";
       symbol: string;
       name: string;
-      period: Exclude<ChartPeriod, "min" | "netWorth" | "accWorth">;
+      period: Exclude<ChartPeriod, "min">;
       bars: MarketKlineBar[];
     };
 
 export type InvestmentAsset = {
   assetType: AssetType;
   code: string;
-  market: StockMarket | "OF";
+  market: StockMarket;
   name: string;
   symbol: string;
   sina: string;

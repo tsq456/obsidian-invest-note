@@ -12,7 +12,7 @@ import { copyChartSnapshotToClipboard, insertChartSnapshotBelowStockParagraph } 
 import { createInteractiveMarketChart, type InteractiveMarketChart } from "./interactiveChart";
 import type InvestmentNotesPlugin from "./main";
 import { fetchMarketChartData } from "./marketData";
-import { getAssetChartUrl, getAssetSymbolFromHref } from "./stockStore";
+import { getAssetSymbolFromHref } from "./stockStore";
 import type { AssetType, ChartPeriod, InvestmentNotesData } from "./types";
 
 const CHART_PERIODS: Array<{ value: ChartPeriod; label: string }> = [
@@ -24,12 +24,7 @@ const CHART_PERIODS: Array<{ value: ChartPeriod; label: string }> = [
   { value: "weekly", label: "周K" },
   { value: "monthly", label: "月K" }
 ];
-const FUND_CHART_PERIODS: Array<{ value: ChartPeriod; label: string }> = [
-  { value: "netWorth", label: "净值走势" },
-  { value: "accWorth", label: "累计净值" }
-];
 const DEFAULT_PERIOD: ChartPeriod = "min";
-const DEFAULT_FUND_PERIOD: ChartPeriod = "netWorth";
 const TEXT_FONT_STEP = 2;
 const INTRADAY_REFRESH_MS = 15000;
 const KLINE_REFRESH_MS = 60000;
@@ -62,14 +57,6 @@ type EastMoneyQuoteResponse = {
   };
 };
 
-type FundQuoteSnapshot = {
-  date: string;
-  name: string;
-  netWorth: number | null;
-  accWorth: number | null;
-  dailyReturn: number | null;
-};
-
 type StockHoverTarget = {
   element: HTMLElement;
   symbol: string;
@@ -95,7 +82,6 @@ export class HoverPreview {
   private interactiveChart: InteractiveMarketChart | null = null;
   private chartRefreshTimer: number | null = null;
   private readonly quoteCache = new Map<string, QuoteSnapshot>();
-  private readonly fundQuoteCache = new Map<string, FundQuoteSnapshot>();
 
   constructor(
     private readonly plugin: InvestmentNotesPlugin,
@@ -191,10 +177,8 @@ export class HoverPreview {
   private show(targetEl: HTMLElement, symbol: string, lineHint: number | null): void {
     this.clearHideTimer();
     this.removePopover();
-    const assetType = getAssetTypeFromSymbol(symbol);
     this.activeSymbol = symbol;
-    this.activePeriod =
-      assetType === "fund" ? DEFAULT_FUND_PERIOD : normalizeMarketChartPeriod(this.data.settings.defaultChartPeriod);
+    this.activePeriod = normalizeMarketChartPeriod(this.data.settings.defaultChartPeriod);
     this.annotationTool = "arrow";
     this.annotationColor = DEFAULT_ANNOTATION_COLOR;
     this.annotationFontSize = DEFAULT_TEXT_FONT_SIZE;
@@ -213,7 +197,7 @@ export class HoverPreview {
     const periodControls = popover.createDiv({ cls: "stock-note-period-tabs" });
     const imageWrap = popover.createDiv({ cls: "stock-note-popover-image-wrap" });
     const actions = popover.createDiv({ cls: "stock-note-popover-actions" });
-    getChartPeriods(assetType).forEach((period) => {
+    getChartPeriods().forEach((period) => {
       const button = periodControls.createEl("button", {
         cls: "stock-note-period-tab",
         text: period.label,
@@ -231,10 +215,6 @@ export class HoverPreview {
         void this.renderChart(symbol, imageWrap);
       });
     });
-
-    if (assetType === "fund") {
-      this.renderSnapshotControls(actions, symbol);
-    }
 
     popover.addEventListener("mouseenter", () => this.clearHideTimer());
     popover.addEventListener("mouseleave", () => this.scheduleHide());
@@ -302,22 +282,6 @@ export class HoverPreview {
     quoteEl.createSpan({ cls: "stock-note-quote-loading", text: "行情加载中..." });
 
     try {
-      if (getAssetTypeFromSymbol(symbol) === "fund") {
-        const quote = await this.getFundQuoteSnapshot(symbol);
-        if (symbol !== this.activeSymbol) {
-          return;
-        }
-
-        quoteEl.empty();
-        renderFundSummary(quoteEl, quote);
-        const detailEl = quoteEl.createDiv({ cls: "stock-note-quote-row stock-note-fund-quote-row" });
-        addQuoteItem(detailEl, "日期", quote.date);
-        addQuoteItem(detailEl, "单位净值", formatNetWorth(quote.netWorth));
-        addQuoteItem(detailEl, "累计净值", formatNetWorth(quote.accWorth));
-        addQuoteItem(detailEl, "日涨幅", formatSignedPercent(quote.dailyReturn), getValueChangeClass(quote.dailyReturn));
-        return;
-      }
-
       const quote = await this.getQuoteSnapshot(symbol);
       if (symbol !== this.activeSymbol) {
         return;
@@ -350,60 +314,19 @@ export class HoverPreview {
     const loading = imageWrap.createDiv({ cls: "stock-note-popover-loading", text: "图表加载中..." });
     const period = this.activePeriod;
 
-    if (getAssetTypeFromSymbol(symbol) !== "fund") {
-      const chartEl = imageWrap.createDiv({ cls: "stock-note-interactive-chart" });
-      try {
-        const chart = createInteractiveMarketChart(chartEl);
-        this.interactiveChart = chart;
-        await this.updateInteractiveChart(symbol, period, chart, imageWrap, loading);
-        this.chartRefreshTimer = window.setInterval(() => {
-          void this.updateInteractiveChart(symbol, period, chart, imageWrap, loading, true);
-        }, period === "min" ? INTRADAY_REFRESH_MS : KLINE_REFRESH_MS);
-      } catch (error) {
-        console.warn("[investment-notes] Failed to render interactive chart", error);
-        chartEl.remove();
-        loading.setText(`图表暂不可用：${formatErrorMessage(error)}`);
-      }
-      return;
+    const chartEl = imageWrap.createDiv({ cls: "stock-note-interactive-chart" });
+    try {
+      const chart = createInteractiveMarketChart(chartEl);
+      this.interactiveChart = chart;
+      await this.updateInteractiveChart(symbol, period, chart, imageWrap, loading);
+      this.chartRefreshTimer = window.setInterval(() => {
+        void this.updateInteractiveChart(symbol, period, chart, imageWrap, loading, true);
+      }, period === "min" ? INTRADAY_REFRESH_MS : KLINE_REFRESH_MS);
+    } catch (error) {
+      console.warn("[investment-notes] Failed to render interactive chart", error);
+      chartEl.remove();
+      loading.setText(`图表暂不可用：${formatErrorMessage(error)}`);
     }
-
-    const chartUrl = getAssetChartUrl(symbol, this.activePeriod);
-    if (!chartUrl) {
-      loading.setText("图表暂不可用");
-      return;
-    }
-
-    const chartFrame = imageWrap.createDiv({ cls: "stock-note-chart-frame" });
-    const img = imageWrap.createEl("img", {
-      cls: "stock-note-popover-image",
-      attr: {
-        src: chartUrl,
-        alt: `${symbol} 图表`
-      }
-    });
-    chartFrame.appendChild(img);
-    const annotationCanvas = chartFrame.createEl("canvas", {
-      cls: "stock-note-annotation-canvas"
-    });
-    img.hide();
-    annotationCanvas.hide();
-
-    img.addEventListener("load", () => {
-      if (symbol !== this.activeSymbol || period !== this.activePeriod || !imageWrap.contains(chartFrame)) {
-        return;
-      }
-
-      loading.hide();
-      img.show();
-      annotationCanvas.show();
-      this.annotationController = new ChartAnnotationController(annotationCanvas, img);
-      this.annotationController.setTool(this.annotationTool);
-      this.annotationController.setColor(this.annotationColor);
-      this.annotationController.setFontSize(this.annotationFontSize);
-    });
-    img.addEventListener("error", () => {
-      loading.setText("图表暂不可用");
-    });
   }
 
   private async updateInteractiveChart(
@@ -571,17 +494,6 @@ export class HoverPreview {
 
     const quote = await fetchQuoteSnapshot(symbol);
     this.quoteCache.set(symbol, quote);
-    return quote;
-  }
-
-  private async getFundQuoteSnapshot(symbol: string): Promise<FundQuoteSnapshot> {
-    const cached = this.fundQuoteCache.get(symbol);
-    if (cached) {
-      return cached;
-    }
-
-    const quote = await fetchFundQuoteSnapshot(symbol);
-    this.fundQuoteCache.set(symbol, quote);
     return quote;
   }
 
@@ -823,63 +735,6 @@ async function fetchQuoteSnapshot(symbol: string): Promise<QuoteSnapshot> {
   };
 }
 
-async function fetchFundQuoteSnapshot(symbol: string): Promise<FundQuoteSnapshot> {
-  const match = symbol.toUpperCase().match(/^OF(\d{6})$/);
-  if (!match) {
-    throw new Error(`Unsupported fund symbol: ${symbol}`);
-  }
-
-  const code = match[1];
-  const response = await requestUrl({
-    url: `https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`,
-    method: "GET",
-    headers: {
-      Accept: "application/javascript,text/plain,*/*",
-      Referer: `https://fund.eastmoney.com/${code}.html`,
-      "User-Agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Obsidian Investment Notes"
-    }
-  });
-  const text = response.text;
-  const name = parseStringVar(text, "fS_name") ?? code;
-  const netWorthTrend = parseJsonVar<Array<{ x?: number; y?: number; equityReturn?: number }>>(text, "Data_netWorthTrend");
-  const accWorthTrend = parseJsonVar<Array<[number, number]>>(text, "Data_ACWorthTrend");
-  const latestNetWorth = netWorthTrend && netWorthTrend.length > 0 ? netWorthTrend[netWorthTrend.length - 1] : null;
-  const latestAccWorth = accWorthTrend && accWorthTrend.length > 0 ? accWorthTrend[accWorthTrend.length - 1] : null;
-
-  return {
-    name,
-    date: latestNetWorth?.x ? formatDate(new Date(latestNetWorth.x)) : "-",
-    netWorth: toNullableNumber(latestNetWorth?.y),
-    accWorth: toNullableNumber(latestAccWorth?.[1]),
-    dailyReturn: toNullableNumber(latestNetWorth?.equityReturn)
-  };
-}
-
-function parseStringVar(text: string, name: string): string | null {
-  const match = text.match(new RegExp(`var\\s+${name}\\s*=\\s*"([^"]*)"`));
-  return match ? match[1] : null;
-}
-
-function parseJsonVar<T>(text: string, name: string): T | null {
-  const startMatch = text.match(new RegExp(`var\\s+${name}\\s*=`));
-  if (!startMatch || startMatch.index === undefined) {
-    return null;
-  }
-
-  const start = startMatch.index + startMatch[0].length;
-  const end = text.indexOf(";", start);
-  if (end < 0) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(text.slice(start, end).trim()) as T;
-  } catch (error) {
-    console.warn(`[investment-notes] Failed to parse ${name}`, error);
-    return null;
-  }
-}
-
 function renderPriceSummary(parent: HTMLElement, quote: QuoteSnapshot): void {
   const changeClass = getValueChangeClass(quote.changeAmount);
   const summary = parent.createDiv({ cls: "stock-note-price-summary" });
@@ -900,24 +755,6 @@ function renderPriceSummary(parent: HTMLElement, quote: QuoteSnapshot): void {
     priceEl.addClass(changeClass);
     changeAmountEl.addClass(changeClass);
     changePercentEl.addClass(changeClass);
-  }
-}
-
-function renderFundSummary(parent: HTMLElement, quote: FundQuoteSnapshot): void {
-  const changeClass = getValueChangeClass(quote.dailyReturn);
-  const summary = parent.createDiv({ cls: "stock-note-price-summary stock-note-fund-summary" });
-  const netWorthEl = summary.createSpan({
-    cls: "stock-note-price-current",
-    text: formatNetWorth(quote.netWorth)
-  });
-  const dailyReturnEl = summary.createSpan({
-    cls: "stock-note-price-change",
-    text: formatSignedPercent(quote.dailyReturn)
-  });
-
-  if (changeClass) {
-    netWorthEl.addClass(changeClass);
-    dailyReturnEl.addClass(changeClass);
   }
 }
 
@@ -946,16 +783,12 @@ function getValueChangeClass(value: number | null): string | undefined {
   return value > 0 ? "stock-note-change-up" : "stock-note-change-down";
 }
 
-function getChartPeriods(assetType: AssetType): Array<{ value: ChartPeriod; label: string }> {
-  return assetType === "fund" ? FUND_CHART_PERIODS : CHART_PERIODS;
+function getChartPeriods(): Array<{ value: ChartPeriod; label: string }> {
+  return CHART_PERIODS;
 }
 
 function getAssetTypeFromSymbol(symbol: string): AssetType {
   const normalized = symbol.toUpperCase();
-  if (normalized.startsWith("OF")) {
-    return "fund";
-  }
-
   if (isEtfSymbol(normalized)) {
     return "etf";
   }
@@ -983,11 +816,6 @@ function toEastMoneySecid(symbol: string): string | null {
 }
 
 function toDisplayCode(symbol: string): string {
-  const fundMatch = symbol.toUpperCase().match(/^OF(\d{6})$/);
-  if (fundMatch) {
-    return fundMatch[1];
-  }
-
   const match = symbol.toUpperCase().match(/^(SH|SZ|BJ)(\d{6})$/);
   return match ? `${match[2]}.${match[1]}` : symbol;
 }
@@ -1005,10 +833,6 @@ function formatDate(date: Date): string {
 
 function formatPrice(value: number | null): string {
   return value === null ? "-" : value.toFixed(2);
-}
-
-function formatNetWorth(value: number | null): string {
-  return value === null ? "-" : value.toFixed(4);
 }
 
 function formatCurrencyPrice(value: number | null): string {

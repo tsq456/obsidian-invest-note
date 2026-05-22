@@ -27,7 +27,7 @@ const KLINE_PERIOD: Record<MarketKlinePeriod, number> = {
   monthly: 103
 };
 
-type MarketKlinePeriod = Exclude<ChartPeriod, "min" | "netWorth" | "accWorth">;
+type MarketKlinePeriod = Exclude<ChartPeriod, "min">;
 type SinaDirectKlinePeriod = "minute5" | "minute30" | "minute60" | "daily";
 
 type EastMoneyKlineResponse = {
@@ -323,7 +323,7 @@ function toSinaSymbol(symbol: string): string | null {
 }
 
 function isMarketKlinePeriod(period: ChartPeriod): period is MarketKlinePeriod {
-  return period !== "min" && period !== "netWorth" && period !== "accWorth";
+  return period !== "min";
 }
 
 function isSinaDirectKlinePeriod(period: MarketKlinePeriod): period is SinaDirectKlinePeriod {
