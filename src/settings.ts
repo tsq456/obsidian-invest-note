@@ -4,6 +4,9 @@ import type { ChartPeriod } from "./types";
 
 const PERIOD_OPTIONS: Partial<Record<ChartPeriod, string>> = {
   min: "分时",
+  minute5: "5 分钟 K",
+  minute30: "30 分钟 K",
+  minute60: "60 分钟 K",
   daily: "日 K",
   weekly: "周 K",
   monthly: "月 K"

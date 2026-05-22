@@ -17,6 +17,9 @@ import type { AssetType, ChartPeriod, InvestmentNotesData } from "./types";
 
 const CHART_PERIODS: Array<{ value: ChartPeriod; label: string }> = [
   { value: "min", label: "分时" },
+  { value: "minute5", label: "5分" },
+  { value: "minute30", label: "30分" },
+  { value: "minute60", label: "60分" },
   { value: "daily", label: "日K" },
   { value: "weekly", label: "周K" },
   { value: "monthly", label: "月K" }

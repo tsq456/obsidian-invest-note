@@ -18,11 +18,17 @@ const SINA_HEADERS = {
   "User-Agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Obsidian Investment Notes"
 };
 
-const KLINE_PERIOD: Record<Exclude<ChartPeriod, "min" | "netWorth" | "accWorth">, number> = {
+const KLINE_PERIOD: Record<MarketKlinePeriod, number> = {
+  minute5: 5,
+  minute30: 30,
+  minute60: 60,
   daily: 101,
   weekly: 102,
   monthly: 103
 };
+
+type MarketKlinePeriod = Exclude<ChartPeriod, "min" | "netWorth" | "accWorth">;
+type SinaDirectKlinePeriod = "minute5" | "minute30" | "minute60" | "daily";
 
 type EastMoneyKlineResponse = {
   data?: {
@@ -54,7 +60,7 @@ export async function fetchMarketChartData(symbol: string, period: ChartPeriod):
     return fetchIntradayData(symbol);
   }
 
-  if (period === "daily" || period === "weekly" || period === "monthly") {
+  if (isMarketKlinePeriod(period)) {
     return fetchKlineData(symbol, period);
   }
 
@@ -89,34 +95,36 @@ async function fetchIntradayData(symbol: string): Promise<MarketChartData> {
 
 async function fetchKlineData(
   symbol: string,
-  period: Exclude<ChartPeriod, "min" | "netWorth" | "accWorth">
+  period: MarketKlinePeriod
 ): Promise<MarketChartData> {
-  const secid = toEastMoneySecid(symbol);
-  if (!secid) {
-    throw new Error(`Unsupported symbol: ${symbol}`);
-  }
+  if (period === "daily" || period === "weekly" || period === "monthly") {
+    const secid = toEastMoneySecid(symbol);
+    try {
+      if (!secid) {
+        throw new Error(`Unsupported symbol: ${symbol}`);
+      }
 
-  try {
-    const body = await requestEastMoneyJson<EastMoneyKlineResponse>(
-      `/api/qt/stock/kline/get?secid=${secid}` +
-        "&fields1=f1,f2,f3,f4,f5,f6" +
-        "&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61" +
-        `&klt=${KLINE_PERIOD[period]}&fqt=1&end=20500101&lmt=120`,
-      EASTMONEY_KLINE_HOSTS
-    );
-    const data = body.data;
-    const bars = data?.klines?.map(parseKlineBar).filter((bar): bar is MarketKlineBar => bar !== null) ?? [];
-    if (bars.length > 0) {
-      return {
-        kind: "kline",
-        symbol,
-        name: data?.name ?? symbol,
-        period,
-        bars
-      };
+      const body = await requestEastMoneyJson<EastMoneyKlineResponse>(
+        `/api/qt/stock/kline/get?secid=${secid}` +
+          "&fields1=f1,f2,f3,f4,f5,f6" +
+          "&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61" +
+          `&klt=${KLINE_PERIOD[period]}&fqt=1&end=20500101&lmt=120`,
+        EASTMONEY_KLINE_HOSTS
+      );
+      const data = body.data;
+      const bars = data?.klines?.map(parseKlineBar).filter((bar): bar is MarketKlineBar => bar !== null) ?? [];
+      if (bars.length > 0) {
+        return {
+          kind: "kline",
+          symbol,
+          name: data?.name ?? symbol,
+          period,
+          bars
+        };
+      }
+    } catch (error) {
+      console.warn("[investment-notes] EastMoney kline failed; falling back to Sina", error);
     }
-  } catch (error) {
-    console.warn("[investment-notes] EastMoney kline failed; falling back to Sina", error);
   }
 
   return {
@@ -181,24 +189,25 @@ function toEastMoneySecid(symbol: string): string | null {
 
 async function fetchSinaKlineBars(
   symbol: string,
-  period: Exclude<ChartPeriod, "min" | "netWorth" | "accWorth">
+  period: MarketKlinePeriod
 ): Promise<MarketKlineBar[]> {
   const sinaSymbol = toSinaSymbol(symbol);
   if (!sinaSymbol) {
     throw new Error(`Unsupported Sina symbol: ${symbol}`);
   }
 
-  const datalen = period === "daily" ? 120 : period === "weekly" ? 720 : 1800;
+  const datalen = getSinaDatalen(period);
+  const scale = getSinaScale(period);
   const response = await requestUrl({
     url:
       "https://quotes.sina.cn/cn/api/jsonp.php/var%20kline=/CN_MarketDataService.getKLineData" +
-      `?symbol=${sinaSymbol}&scale=240&ma=no&datalen=${datalen}`,
+      `?symbol=${sinaSymbol}&scale=${scale}&ma=no&datalen=${datalen}`,
     method: "GET",
     headers: SINA_HEADERS
   });
   const rows = parseSinaKlineRows(response.text);
-  const dailyBars = rows.map(parseSinaKlineBar).filter((bar): bar is MarketKlineBar => bar !== null);
-  const bars = period === "daily" ? dailyBars : aggregateBars(dailyBars, period);
+  const sourceBars = rows.map(parseSinaKlineBar).filter((bar): bar is MarketKlineBar => bar !== null);
+  const bars = isSinaDirectKlinePeriod(period) ? sourceBars : aggregateBars(sourceBars, period);
   if (bars.length === 0) {
     throw new Error("Empty Sina kline response");
   }
@@ -238,7 +247,7 @@ function parseSinaKlineRows(text: string): SinaKlineRow[] {
 }
 
 function parseSinaKlineBar(row: SinaKlineRow): MarketKlineBar | null {
-  const date = row.day?.slice(0, 10) ?? "";
+  const date = row.day ?? "";
   const open = Number(row.open);
   const close = Number(row.close);
   const high = Number(row.high);
@@ -266,7 +275,7 @@ function parseSinaKlineBar(row: SinaKlineRow): MarketKlineBar | null {
 
 function aggregateBars(
   dailyBars: MarketKlineBar[],
-  period: Exclude<ChartPeriod, "min" | "daily" | "netWorth" | "accWorth">
+  period: "weekly" | "monthly"
 ): MarketKlineBar[] {
   const groups = new Map<string, MarketKlineBar[]>();
   for (const bar of dailyBars) {
@@ -311,6 +320,30 @@ function toSinaSymbol(symbol: string): string | null {
   }
 
   return `${match[1]}${match[2]}`;
+}
+
+function isMarketKlinePeriod(period: ChartPeriod): period is MarketKlinePeriod {
+  return period !== "min" && period !== "netWorth" && period !== "accWorth";
+}
+
+function isSinaDirectKlinePeriod(period: MarketKlinePeriod): period is SinaDirectKlinePeriod {
+  return period === "minute5" || period === "minute30" || period === "minute60" || period === "daily";
+}
+
+function getSinaScale(period: MarketKlinePeriod): number {
+  if (period === "minute5") return 5;
+  if (period === "minute30") return 30;
+  if (period === "minute60") return 60;
+  return 240;
+}
+
+function getSinaDatalen(period: MarketKlinePeriod): number {
+  if (period === "minute5") return 240;
+  if (period === "minute30") return 240;
+  if (period === "minute60") return 240;
+  if (period === "daily") return 120;
+  if (period === "weekly") return 720;
+  return 1800;
 }
 
 function toNullableNumber(value: unknown): number | null {

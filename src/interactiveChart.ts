@@ -263,6 +263,9 @@ function buildMaSeries(name: string, bars: MarketKlineBar[], dayCount: number, c
 }
 
 function getPeriodLabel(period: ChartPeriod): string {
+  if (period === "minute5") return "5分K";
+  if (period === "minute30") return "30分K";
+  if (period === "minute60") return "60分K";
   if (period === "weekly") return "周K";
   if (period === "monthly") return "月K";
   return "日K";
