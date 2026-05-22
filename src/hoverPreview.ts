@@ -232,7 +232,6 @@ export class HoverPreview {
     if (assetType === "fund") {
       this.renderSnapshotControls(actions, symbol);
     }
-    void this.renderChart(symbol, imageWrap);
 
     popover.addEventListener("mouseenter", () => this.clearHideTimer());
     popover.addEventListener("mouseleave", () => this.scheduleHide());
@@ -254,6 +253,7 @@ export class HoverPreview {
     document.body.appendChild(popover);
     this.positionPopover(targetEl, popover);
     this.popoverEl = popover;
+    void this.renderChart(symbol, imageWrap);
   }
 
   private async copyCurrentChartSnapshot(symbol: string, button: HTMLButtonElement): Promise<void> {
@@ -359,7 +359,7 @@ export class HoverPreview {
       } catch (error) {
         console.warn("[investment-notes] Failed to render interactive chart", error);
         chartEl.remove();
-        loading.setText("图表暂不可用");
+        loading.setText(`图表暂不可用：${formatErrorMessage(error)}`);
       }
       return;
     }
@@ -423,7 +423,7 @@ export class HoverPreview {
     } catch (error) {
       console.warn("[investment-notes] Failed to update interactive chart", error);
       if (!silent) {
-        loading.setText("图表暂不可用");
+        loading.setText(`图表暂不可用：${formatErrorMessage(error)}`);
       }
     }
   }
@@ -714,6 +714,11 @@ function normalizeHoverDelay(value: number): number {
   }
 
   return Math.min(5000, Math.floor(value));
+}
+
+function formatErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.length > 48 ? `${message.slice(0, 48)}...` : message;
 }
 
 type StockNoteIcon =
