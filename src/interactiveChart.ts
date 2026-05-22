@@ -2,6 +2,13 @@ import * as echarts from "echarts";
 import type { ChartPeriod, MarketChartData, MarketKlineBar } from "./types";
 
 const MUTED_TEXT_COLOR = "#8a8f98";
+const MA_SERIES = [
+  { name: "MA5", dayCount: 5, color: "#4777d9" },
+  { name: "MA10", dayCount: 10, color: "#d99a20" },
+  { name: "MA20", dayCount: 20, color: "#8b5cf6" },
+  { name: "MA30", dayCount: 30, color: "#0891b2" },
+  { name: "MA60", dayCount: 60, color: "#64748b" }
+];
 
 export type InteractiveMarketChart = {
   update(data: MarketChartData, period: ChartPeriod): void;
@@ -58,8 +65,8 @@ function buildIntradayOption(data: Extract<MarketChartData, { kind: "intraday" }
     },
     axisPointer: { link: [{ xAxisIndex: "all" }] },
     grid: [
-      { left: 48, right: 12, top: 18, height: 172 },
-      { left: 48, right: 12, top: 224, height: 54 }
+      { left: 48, right: 12, top: 18, height: 182 },
+      { left: 48, right: 12, top: 230, height: 48 }
     ],
     xAxis: [
       buildCategoryAxis(times, false),
@@ -74,8 +81,14 @@ function buildIntradayOption(data: Extract<MarketChartData, { kind: "intraday" }
       {
         gridIndex: 1,
         scale: true,
-        axisLabel: { color: MUTED_TEXT_COLOR, formatter: "{value}万" },
-        splitLine: { lineStyle: { color: "rgba(120, 120, 120, 0.12)" } }
+        splitNumber: 2,
+        axisLabel: {
+          color: MUTED_TEXT_COLOR,
+          hideOverlap: true,
+          margin: 4,
+          formatter: (value: number) => formatAxisVolume(value)
+        },
+        splitLine: { show: false }
       }
     ],
     series: [
@@ -118,14 +131,14 @@ function buildKlineOption(
 
   return {
     animation: false,
-    color: ["#4777d9", "#d99a20"],
+    color: MA_SERIES.map((item) => item.color),
     legend: {
       top: 0,
       left: 8,
       itemWidth: 12,
       itemHeight: 8,
       textStyle: { color: MUTED_TEXT_COLOR },
-      data: [getPeriodLabel(period), "MA5", "MA10", "成交量"]
+      data: MA_SERIES.map((item) => item.name)
     },
     tooltip: {
       trigger: "axis",
@@ -151,8 +164,8 @@ function buildKlineOption(
     },
     axisPointer: { link: [{ xAxisIndex: "all" }] },
     grid: [
-      { left: 48, right: 12, top: 34, height: 156 },
-      { left: 48, right: 12, top: 224, height: 54 }
+      { left: 48, right: 12, top: 34, height: 166 },
+      { left: 48, right: 12, top: 230, height: 48 }
     ],
     xAxis: [
       buildCategoryAxis(dates, false),
@@ -167,8 +180,14 @@ function buildKlineOption(
       {
         gridIndex: 1,
         scale: true,
-        axisLabel: { color: MUTED_TEXT_COLOR, formatter: "{value}万" },
-        splitLine: { lineStyle: { color: "rgba(120, 120, 120, 0.12)" } }
+        splitNumber: 2,
+        axisLabel: {
+          color: MUTED_TEXT_COLOR,
+          hideOverlap: true,
+          margin: 4,
+          formatter: (value: number) => formatAxisVolume(value)
+        },
+        splitLine: { show: false }
       }
     ],
     dataZoom: [
@@ -195,8 +214,7 @@ function buildKlineOption(
           borderColor0: "#1f8f4d"
         }
       },
-      buildMaSeries("MA5", data.bars, 5),
-      buildMaSeries("MA10", data.bars, 10),
+      ...MA_SERIES.map((item) => buildMaSeries(item.name, data.bars, item.dayCount, item.color)),
       {
         name: "成交量",
         type: "bar",
@@ -223,7 +241,7 @@ function buildCategoryAxis(data: string[], showLabel: boolean): echarts.XAXisCom
   };
 }
 
-function buildMaSeries(name: string, bars: MarketKlineBar[], dayCount: number): echarts.SeriesOption {
+function buildMaSeries(name: string, bars: MarketKlineBar[], dayCount: number, color: string): echarts.SeriesOption {
   return {
     name,
     type: "line",
@@ -240,7 +258,7 @@ function buildMaSeries(name: string, bars: MarketKlineBar[], dayCount: number): 
     }),
     smooth: true,
     symbol: "none",
-    lineStyle: { width: 1.2 }
+    lineStyle: { color, width: 1.15 }
   };
 }
 
@@ -263,6 +281,11 @@ function formatVolume(value: number | null): string {
   if (Math.abs(value) >= 100000000) return `${(value / 100000000).toFixed(2)}亿手`;
   if (Math.abs(value) >= 10000) return `${(value / 10000).toFixed(2)}万手`;
   return `${value.toFixed(0)}手`;
+}
+
+function formatAxisVolume(value: number): string {
+  if (Math.abs(value) >= 10000) return `${(value / 10000).toFixed(1)}亿`;
+  return `${Math.round(value)}万`;
 }
 
 function formatAmount(value: number | null): string {
