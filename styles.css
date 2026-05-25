@@ -226,9 +226,9 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 
 .stock-note-popover[data-card-width="400"] .stock-note-period-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
-  height: auto;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  height: 26px;
   overflow-x: visible;
 }
 
@@ -247,9 +247,11 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 }
 
 .stock-note-popover[data-card-width="400"] .stock-note-period-tab {
+  height: 26px;
   min-width: 0;
   width: 100%;
-  padding: 0 6px;
+  padding: 0;
+  font-size: 11px;
 }
 
 .stock-note-period-tab.is-active {
