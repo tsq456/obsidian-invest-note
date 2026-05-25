@@ -1,6 +1,6 @@
 import { Notice, PluginSettingTab, Setting } from "obsidian";
 import type InvestmentNotesPlugin from "./main";
-import type { ChartPeriod, HoverCardWidth } from "./types";
+import type { ChartPeriod, HoverCardWidth, KlinePeriodCount } from "./types";
 
 const PERIOD_OPTIONS: Partial<Record<ChartPeriod, string>> = {
   min: "分时",
@@ -111,6 +111,21 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
             await this.plugin.savePluginData();
           });
       });
+
+    new Setting(containerEl)
+      .setName("K 线加载范围")
+      .setDesc("控制 K 线图默认拉取多少个周期；对日 K 是交易日，对周 K/月 K 是周或月周期。")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("60", "60 个周期")
+          .addOption("180", "180 个周期")
+          .addOption("360", "360 个周期")
+          .setValue(String(this.plugin.data.settings.klinePeriodCount ?? 180))
+          .onChange(async (value) => {
+            this.plugin.data.settings.klinePeriodCount = Number(value) as KlinePeriodCount;
+            await this.plugin.savePluginData();
+          })
+      );
 
     containerEl.createEl("h3", { text: "标的列表" });
 

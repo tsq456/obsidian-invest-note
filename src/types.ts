@@ -9,6 +9,7 @@ export type ChartPeriod =
   | "weekly"
   | "monthly";
 export type HoverCardWidth = 400 | 700 | 1000;
+export type KlinePeriodCount = 60 | 180 | 360;
 
 export type MarketKlineBar = {
   date: string;
@@ -86,6 +87,7 @@ export type InvestmentNotesSettings = {
   stockListTtlDays: number;
   defaultChartPeriod: ChartPeriod;
   hoverCardWidth: HoverCardWidth;
+  klinePeriodCount: KlinePeriodCount;
   enableHoverPreview: boolean;
   enableSourceHoverPreview: boolean;
   hoverPreviewDelayMs: number;
@@ -109,6 +111,7 @@ export const DEFAULT_SETTINGS: InvestmentNotesSettings = {
   stockListTtlDays: 7,
   defaultChartPeriod: "min",
   hoverCardWidth: 700,
+  klinePeriodCount: 180,
   enableHoverPreview: true,
   enableSourceHoverPreview: true,
   hoverPreviewDelayMs: 300,

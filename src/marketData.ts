@@ -1,5 +1,5 @@
 import { requestUrl } from "obsidian";
-import type { ChartPeriod, MarketChartData, MarketKlineBar, MarketTrendPoint } from "./types";
+import type { ChartPeriod, KlinePeriodCount, MarketChartData, MarketKlineBar, MarketTrendPoint } from "./types";
 
 const EASTMONEY_HEADERS = {
   Accept: "application/json,text/plain,*/*",
@@ -55,13 +55,17 @@ type SinaKlineRow = {
   amount?: string;
 };
 
-export async function fetchMarketChartData(symbol: string, period: ChartPeriod): Promise<MarketChartData> {
+export async function fetchMarketChartData(
+  symbol: string,
+  period: ChartPeriod,
+  klinePeriodCount: KlinePeriodCount = 180
+): Promise<MarketChartData> {
   if (period === "min") {
     return fetchIntradayData(symbol);
   }
 
   if (isMarketKlinePeriod(period)) {
-    return fetchKlineData(symbol, period);
+    return fetchKlineData(symbol, period, normalizeKlinePeriodCount(klinePeriodCount));
   }
 
   throw new Error(`Unsupported market chart period: ${period}`);
@@ -95,7 +99,8 @@ async function fetchIntradayData(symbol: string): Promise<MarketChartData> {
 
 async function fetchKlineData(
   symbol: string,
-  period: MarketKlinePeriod
+  period: MarketKlinePeriod,
+  klinePeriodCount: KlinePeriodCount
 ): Promise<MarketChartData> {
   if (period === "daily" || period === "weekly" || period === "monthly") {
     const secid = toEastMoneySecid(symbol);
@@ -108,7 +113,7 @@ async function fetchKlineData(
         `/api/qt/stock/kline/get?secid=${secid}` +
           "&fields1=f1,f2,f3,f4,f5,f6" +
           "&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61" +
-          `&klt=${KLINE_PERIOD[period]}&fqt=1&end=20500101&lmt=120`,
+          `&klt=${KLINE_PERIOD[period]}&fqt=1&end=20500101&lmt=${klinePeriodCount}`,
         EASTMONEY_KLINE_HOSTS
       );
       const data = body.data;
@@ -132,7 +137,7 @@ async function fetchKlineData(
     symbol,
     name: symbol,
     period,
-    bars: await fetchSinaKlineBars(symbol, period)
+    bars: await fetchSinaKlineBars(symbol, period, klinePeriodCount)
   };
 }
 
@@ -189,14 +194,15 @@ function toEastMoneySecid(symbol: string): string | null {
 
 async function fetchSinaKlineBars(
   symbol: string,
-  period: MarketKlinePeriod
+  period: MarketKlinePeriod,
+  klinePeriodCount: KlinePeriodCount
 ): Promise<MarketKlineBar[]> {
   const sinaSymbol = toSinaSymbol(symbol);
   if (!sinaSymbol) {
     throw new Error(`Unsupported Sina symbol: ${symbol}`);
   }
 
-  const datalen = getSinaDatalen(period);
+  const datalen = getSinaDatalen(period, klinePeriodCount);
   const scale = getSinaScale(period);
   const response = await requestUrl({
     url:
@@ -212,7 +218,7 @@ async function fetchSinaKlineBars(
     throw new Error("Empty Sina kline response");
   }
 
-  return bars.slice(-120);
+  return bars.slice(-klinePeriodCount);
 }
 
 async function requestEastMoneyJson<T>(path: string, hosts: string[]): Promise<T> {
@@ -337,13 +343,18 @@ function getSinaScale(period: MarketKlinePeriod): number {
   return 240;
 }
 
-function getSinaDatalen(period: MarketKlinePeriod): number {
-  if (period === "minute5") return 240;
-  if (period === "minute30") return 240;
-  if (period === "minute60") return 240;
-  if (period === "daily") return 120;
-  if (period === "weekly") return 720;
-  return 1800;
+function getSinaDatalen(period: MarketKlinePeriod, klinePeriodCount: KlinePeriodCount): number {
+  if (period === "weekly") return Math.max(klinePeriodCount * 7, 720);
+  if (period === "monthly") return Math.max(klinePeriodCount * 31, 1800);
+  return klinePeriodCount;
+}
+
+function normalizeKlinePeriodCount(value: number): KlinePeriodCount {
+  if (value === 60 || value === 180 || value === 360) {
+    return value;
+  }
+
+  return 180;
 }
 
 function toNullableNumber(value: unknown): number | null {

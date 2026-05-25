@@ -193,7 +193,7 @@ function buildKlineOption(
       }
     ],
     dataZoom: [
-      { type: "inside", xAxisIndex: [0, 1], start: 35, end: 100 },
+      { type: "inside", xAxisIndex: [0, 1], start: 0, end: 100 },
       {
         type: "slider",
         xAxisIndex: [0, 1],

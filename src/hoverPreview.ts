@@ -346,7 +346,7 @@ export class HoverPreview {
     silent = false
   ): Promise<void> {
     try {
-      const data = await fetchMarketChartData(symbol, period);
+      const data = await fetchMarketChartData(symbol, period, normalizeKlinePeriodCount(this.data.settings.klinePeriodCount));
       if (symbol !== this.activeSymbol || period !== this.activePeriod || !imageWrap.isConnected) {
         return;
       }
@@ -648,6 +648,14 @@ function normalizeHoverCardWidth(value: number): HoverCardWidth {
   }
 
   return 700;
+}
+
+function normalizeKlinePeriodCount(value: number): 60 | 180 | 360 {
+  if (value === 60 || value === 180 || value === 360) {
+    return value;
+  }
+
+  return 180;
 }
 
 function formatErrorMessage(error: unknown): string {

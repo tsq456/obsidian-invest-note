@@ -245,8 +245,8 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 
 .stock-note-quote-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px 16px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -256,10 +256,6 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 .stock-note-popover[data-card-width="400"] .stock-note-quote-row {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px 14px;
-}
-
-.stock-note-popover[data-card-width="1000"] .stock-note-quote-row {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .stock-note-quote-item {
