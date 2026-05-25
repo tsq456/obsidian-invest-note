@@ -245,10 +245,11 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 
 .stock-note-quote-row {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 10px 16px;
-  padding: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 34px;
+  padding: 2px 0 12px;
   border: 0;
+  border-bottom: 1px solid #e5e7eb;
   border-radius: 0;
   background: transparent;
 }
@@ -260,23 +261,25 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 
 .stock-note-quote-item {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
   min-width: 0;
   white-space: nowrap;
   color: #101828;
-  font-size: 14px;
-  line-height: 20px;
+  font-size: 13px;
+  line-height: 18px;
 }
 
 .stock-note-quote-label,
 .stock-note-quote-loading {
   color: #6a7282;
+  font-weight: 500;
 }
 
 .stock-note-quote-value {
   color: #101828;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .stock-note-popover-image-wrap {
