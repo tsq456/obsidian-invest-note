@@ -224,6 +224,14 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   display: none;
 }
 
+.stock-note-popover[data-card-width="400"] .stock-note-period-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  height: auto;
+  overflow-x: visible;
+}
+
 .stock-note-period-tab {
   height: 28px;
   min-width: 48px;
@@ -236,6 +244,12 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   font-weight: 500;
   line-height: 16px;
   cursor: pointer;
+}
+
+.stock-note-popover[data-card-width="400"] .stock-note-period-tab {
+  min-width: 0;
+  width: 100%;
+  padding: 0 6px;
 }
 
 .stock-note-period-tab.is-active {
