@@ -1,5 +1,5 @@
 import * as echarts from "echarts";
-import type { ChartPeriod, MarketChartData, MarketKlineBar } from "./types";
+import type { ChartPeriod, MarketChartData, MarketKlineBar, MarketTrendPoint } from "./types";
 
 const MUTED_TEXT_COLOR = "#8a8f98";
 const MA_SERIES = [
@@ -12,16 +12,95 @@ const MA_SERIES = [
 
 export type InteractiveMarketChart = {
   update(data: MarketChartData, period: ChartPeriod): void;
+  prependHistory(data: Extract<MarketChartData, { kind: "kline" }>): void;
   resize(): void;
   dispose(): void;
 };
 
-export function createInteractiveMarketChart(container: HTMLElement): InteractiveMarketChart {
+export type ChartHoverPayload =
+  | {
+      kind: "intraday";
+      point: MarketTrendPoint;
+    }
+  | {
+      kind: "kline";
+      bar: MarketKlineBar;
+    };
+
+type InteractiveMarketChartOptions = {
+  onHoverChange?: (payload: ChartHoverPayload | null) => void;
+  onNeedMoreHistory?: () => void;
+};
+
+export function createInteractiveMarketChart(
+  container: HTMLElement,
+  options: InteractiveMarketChartOptions = {}
+): InteractiveMarketChart {
   const chart = echarts.init(container, undefined, { renderer: "canvas" });
+  let currentData: MarketChartData | null = null;
+  let currentPeriod: ChartPeriod | null = null;
+  let requestingHistory = false;
+
+  const emitLatest = () => {
+    options.onHoverChange?.(getHoverPayload(currentData, getPointCount(currentData) - 1));
+  };
+
+  chart.on("updateAxisPointer", (event: unknown) => {
+    const index = getAxisPointerIndex(event);
+    if (index === null) {
+      return;
+    }
+    options.onHoverChange?.(getHoverPayload(currentData, index));
+  });
+
+  chart.on("datazoom", () => {
+    if (!currentData || currentData.kind !== "kline" || requestingHistory) {
+      return;
+    }
+
+    const range = getInsideDataZoomRange(chart);
+    if (range !== null && range <= 1) {
+      requestingHistory = true;
+      options.onNeedMoreHistory?.();
+      window.setTimeout(() => {
+        requestingHistory = false;
+      }, 600);
+    }
+  });
+
+  chart.getZr().on("globalout", emitLatest);
 
   return {
     update(data, period) {
+      currentData = data;
+      currentPeriod = period;
       chart.setOption(data.kind === "intraday" ? buildIntradayOption(data) : buildKlineOption(data, period), true);
+      emitLatest();
+    },
+    prependHistory(data) {
+      if (!currentData || currentData.kind !== "kline" || currentPeriod === null || data.bars.length === 0) {
+        return;
+      }
+
+      const oldLength = currentData.bars.length;
+      const knownDates = new Set(currentData.bars.map((bar) => bar.date));
+      const olderBars = data.bars.filter((bar) => !knownDates.has(bar.date));
+      if (olderBars.length === 0) {
+        return;
+      }
+
+      currentData = {
+        ...currentData,
+        bars: [...olderBars, ...currentData.bars]
+      };
+      chart.setOption(buildKlineOption(currentData, currentPeriod), true);
+      chart.dispatchAction({
+        type: "dataZoom",
+        dataZoomIndex: 0,
+        startValue: olderBars.length,
+        endValue: olderBars.length + oldLength - 1
+      });
+      emitLatest();
     },
     resize() {
       chart.resize();
@@ -45,26 +124,11 @@ function buildIntradayOption(data: Extract<MarketChartData, { kind: "intraday" }
     animation: false,
     color: ["#d14b3f", "#d99a20"],
     tooltip: {
-      ...buildBoundedTooltip(),
+      show: false,
       trigger: "axis",
-      axisPointer: { type: "cross" },
-      formatter(params) {
-        const items = Array.isArray(params) ? params : [params];
-        const index = items[0]?.dataIndex ?? 0;
-        const point = data.points[index];
-        if (!point) {
-          return "";
-        }
-        return [
-          `<strong>${point.time}</strong>`,
-          `价格：${formatPrice(point.close)}`,
-          `均价：${formatPrice(point.average)}`,
-          `成交量：${formatVolume(point.volume)}`,
-          `成交额：${formatAmount(point.amount)}`
-        ].join("<br>");
-      }
+      axisPointer: { type: "cross", label: { show: false } }
     },
-    axisPointer: { link: [{ xAxisIndex: "all" }] },
+    axisPointer: { label: { show: false }, link: [{ xAxisIndex: "all" }] },
     grid: [
       { left: 48, right: 12, top: 18, height: "58%" },
       { left: 48, right: 12, top: "76%", height: "14%" }
@@ -142,29 +206,11 @@ function buildKlineOption(
       data: MA_SERIES.map((item) => item.name)
     },
     tooltip: {
-      ...buildBoundedTooltip(),
+      show: false,
       trigger: "axis",
-      axisPointer: { type: "cross" },
-      formatter(params) {
-        const items = Array.isArray(params) ? params : [params];
-        const index = items[0]?.dataIndex ?? 0;
-        const bar = data.bars[index];
-        if (!bar) {
-          return "";
-        }
-        return [
-          `<strong>${bar.date}</strong>`,
-          `开盘：${formatPrice(bar.open)}`,
-          `收盘：${formatPrice(bar.close)}`,
-          `最高：${formatPrice(bar.high)}`,
-          `最低：${formatPrice(bar.low)}`,
-          `涨跌幅：${formatPercent(bar.changePercent)}`,
-          `成交量：${formatVolume(bar.volume)}`,
-          `成交额：${formatAmount(bar.amount)}`
-        ].join("<br>");
-      }
+      axisPointer: { type: "cross", label: { show: false } }
     },
-    axisPointer: { link: [{ xAxisIndex: "all" }] },
+    axisPointer: { label: { show: false }, link: [{ xAxisIndex: "all" }] },
     grid: [
       { left: 48, right: 12, top: 34, height: "52%" },
       { left: 48, right: 12, top: "74%", height: "14%" }
@@ -193,16 +239,7 @@ function buildKlineOption(
       }
     ],
     dataZoom: [
-      { type: "inside", xAxisIndex: [0, 1], start: 0, end: 100 },
-      {
-        type: "slider",
-        xAxisIndex: [0, 1],
-        bottom: 0,
-        height: 18,
-        showDetail: false,
-        borderColor: "rgba(120, 120, 120, 0.24)",
-        fillerColor: "rgba(80, 120, 200, 0.18)"
-      }
+      { type: "inside", xAxisIndex: [0, 1], start: 0, end: 100, zoomOnMouseWheel: true, moveOnMouseMove: true }
     ],
     series: [
       {
@@ -243,30 +280,6 @@ function buildCategoryAxis(data: string[], showLabel: boolean): echarts.XAXisCom
   };
 }
 
-function buildBoundedTooltip(): echarts.TooltipComponentOption {
-  return {
-    confine: true,
-    appendToBody: false,
-    extraCssText: "max-width: 220px; white-space: nowrap;",
-    position(point, _params, _dom, _rect, size) {
-      const margin = 8;
-      const [mouseX, mouseY] = point;
-      const viewWidth = size.viewSize[0];
-      const viewHeight = size.viewSize[1];
-      const boxWidth = size.contentSize[0];
-      const boxHeight = size.contentSize[1];
-      const rightX = mouseX + 14;
-      const leftX = mouseX - boxWidth - 14;
-      const x = rightX + boxWidth + margin <= viewWidth ? rightX : Math.max(margin, leftX);
-      const lowerY = mouseY + 14;
-      const upperY = mouseY - boxHeight - 14;
-      const y = upperY >= margin ? upperY : Math.min(Math.max(margin, lowerY), viewHeight - boxHeight - margin);
-
-      return [x, y];
-    }
-  };
-}
-
 function buildMaSeries(name: string, bars: MarketKlineBar[], dayCount: number, color: string): echarts.SeriesOption {
   return {
     name,
@@ -286,6 +299,41 @@ function buildMaSeries(name: string, bars: MarketKlineBar[], dayCount: number, c
     symbol: "none",
     lineStyle: { color, width: 1.15 }
   };
+}
+
+function getAxisPointerIndex(event: unknown): number | null {
+  const axesInfo = (event as { axesInfo?: Array<{ value?: number | string }> }).axesInfo;
+  const rawValue = axesInfo?.find((item) => item.value !== undefined)?.value;
+  const index = typeof rawValue === "number" ? rawValue : Number(rawValue);
+  return Number.isFinite(index) ? Math.max(0, Math.floor(index)) : null;
+}
+
+function getHoverPayload(data: MarketChartData | null, index: number): ChartHoverPayload | null {
+  if (!data || index < 0) {
+    return null;
+  }
+
+  if (data.kind === "intraday") {
+    const point = data.points[index];
+    return point ? { kind: "intraday", point } : null;
+  }
+
+  const bar = data.bars[index];
+  return bar ? { kind: "kline", bar } : null;
+}
+
+function getPointCount(data: MarketChartData | null): number {
+  if (!data) {
+    return 0;
+  }
+
+  return data.kind === "intraday" ? data.points.length : data.bars.length;
+}
+
+function getInsideDataZoomRange(chart: echarts.ECharts): number | null {
+  const option = chart.getOption() as { dataZoom?: Array<{ start?: number }> };
+  const start = option.dataZoom?.[0]?.start;
+  return typeof start === "number" ? start : null;
 }
 
 function getPeriodLabel(period: ChartPeriod): string {

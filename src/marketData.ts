@@ -1,5 +1,5 @@
 import { requestUrl } from "obsidian";
-import type { ChartPeriod, KlinePeriodCount, MarketChartData, MarketKlineBar, MarketTrendPoint } from "./types";
+import type { ChartPeriod, MarketChartData, MarketKlineBar, MarketTrendPoint } from "./types";
 
 const EASTMONEY_HEADERS = {
   Accept: "application/json,text/plain,*/*",
@@ -26,6 +26,7 @@ const KLINE_PERIOD: Record<MarketKlinePeriod, number> = {
   weekly: 102,
   monthly: 103
 };
+const KLINE_PAGE_LIMIT = 60;
 
 type MarketKlinePeriod = Exclude<ChartPeriod, "min">;
 type SinaDirectKlinePeriod = "minute5" | "minute30" | "minute60" | "daily";
@@ -57,18 +58,25 @@ type SinaKlineRow = {
 
 export async function fetchMarketChartData(
   symbol: string,
-  period: ChartPeriod,
-  klinePeriodCount: KlinePeriodCount = 180
+  period: ChartPeriod
 ): Promise<MarketChartData> {
   if (period === "min") {
     return fetchIntradayData(symbol);
   }
 
   if (isMarketKlinePeriod(period)) {
-    return fetchKlineData(symbol, period, normalizeKlinePeriodCount(klinePeriodCount));
+    return fetchKlineData(symbol, period, KLINE_PAGE_LIMIT);
   }
 
   throw new Error(`Unsupported market chart period: ${period}`);
+}
+
+export async function fetchPreviousKlineData(
+  symbol: string,
+  period: Exclude<ChartPeriod, "min">,
+  before: string
+): Promise<Extract<MarketChartData, { kind: "kline" }>> {
+  return fetchKlineData(symbol, period, KLINE_PAGE_LIMIT, before);
 }
 
 async function fetchIntradayData(symbol: string): Promise<MarketChartData> {
@@ -100,36 +108,40 @@ async function fetchIntradayData(symbol: string): Promise<MarketChartData> {
 async function fetchKlineData(
   symbol: string,
   period: MarketKlinePeriod,
-  klinePeriodCount: KlinePeriodCount
-): Promise<MarketChartData> {
-  if (period === "daily" || period === "weekly" || period === "monthly") {
-    const secid = toEastMoneySecid(symbol);
-    try {
-      if (!secid) {
-        throw new Error(`Unsupported symbol: ${symbol}`);
-      }
-
-      const body = await requestEastMoneyJson<EastMoneyKlineResponse>(
-        `/api/qt/stock/kline/get?secid=${secid}` +
-          "&fields1=f1,f2,f3,f4,f5,f6" +
-          "&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61" +
-          `&klt=${KLINE_PERIOD[period]}&fqt=1&end=20500101&lmt=${klinePeriodCount}`,
-        EASTMONEY_KLINE_HOSTS
-      );
-      const data = body.data;
-      const bars = data?.klines?.map(parseKlineBar).filter((bar): bar is MarketKlineBar => bar !== null) ?? [];
-      if (bars.length > 0) {
-        return {
-          kind: "kline",
-          symbol,
-          name: data?.name ?? symbol,
-          period,
-          bars
-        };
-      }
-    } catch (error) {
-      console.warn("[investment-notes] EastMoney kline failed; falling back to Sina", error);
+  limit: number,
+  before?: string
+): Promise<Extract<MarketChartData, { kind: "kline" }>> {
+  const secid = toEastMoneySecid(symbol);
+  try {
+    if (!secid) {
+      throw new Error(`Unsupported symbol: ${symbol}`);
     }
+
+    const requestLimit = before ? limit + 1 : limit;
+    const body = await requestEastMoneyJson<EastMoneyKlineResponse>(
+      `/api/qt/stock/kline/get?secid=${secid}` +
+        "&fields1=f1,f2,f3,f4,f5,f6" +
+        "&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61" +
+        `&klt=${KLINE_PERIOD[period]}&fqt=1&end=${toEastMoneyEnd(before)}&lmt=${requestLimit}`,
+      EASTMONEY_KLINE_HOSTS
+    );
+    const data = body.data;
+    const bars = normalizeKlinePage(
+      data?.klines?.map(parseKlineBar).filter((bar): bar is MarketKlineBar => bar !== null) ?? [],
+      limit,
+      before
+    );
+    if (bars.length > 0) {
+      return {
+        kind: "kline",
+        symbol,
+        name: data?.name ?? symbol,
+        period,
+        bars
+      };
+    }
+  } catch (error) {
+    console.warn("[investment-notes] EastMoney kline failed; falling back to Sina", error);
   }
 
   return {
@@ -137,7 +149,7 @@ async function fetchKlineData(
     symbol,
     name: symbol,
     period,
-    bars: await fetchSinaKlineBars(symbol, period, klinePeriodCount)
+    bars: await fetchSinaKlineBars(symbol, period, limit, before)
   };
 }
 
@@ -195,14 +207,15 @@ function toEastMoneySecid(symbol: string): string | null {
 async function fetchSinaKlineBars(
   symbol: string,
   period: MarketKlinePeriod,
-  klinePeriodCount: KlinePeriodCount
+  limit: number,
+  before?: string
 ): Promise<MarketKlineBar[]> {
   const sinaSymbol = toSinaSymbol(symbol);
   if (!sinaSymbol) {
     throw new Error(`Unsupported Sina symbol: ${symbol}`);
   }
 
-  const datalen = getSinaDatalen(period, klinePeriodCount);
+  const datalen = getSinaDatalen(period, before ? Math.max(limit * 6, 360) : limit);
   const scale = getSinaScale(period);
   const response = await requestUrl({
     url:
@@ -218,7 +231,7 @@ async function fetchSinaKlineBars(
     throw new Error("Empty Sina kline response");
   }
 
-  return bars.slice(-klinePeriodCount);
+  return normalizeKlinePage(bars, limit, before);
 }
 
 async function requestEastMoneyJson<T>(path: string, hosts: string[]): Promise<T> {
@@ -343,18 +356,28 @@ function getSinaScale(period: MarketKlinePeriod): number {
   return 240;
 }
 
-function getSinaDatalen(period: MarketKlinePeriod, klinePeriodCount: KlinePeriodCount): number {
-  if (period === "weekly") return Math.max(klinePeriodCount * 7, 720);
-  if (period === "monthly") return Math.max(klinePeriodCount * 31, 1800);
-  return klinePeriodCount;
+function getSinaDatalen(period: MarketKlinePeriod, limit: number): number {
+  if (period === "weekly") return Math.max(limit * 7, 720);
+  if (period === "monthly") return Math.max(limit * 31, 1800);
+  return limit;
 }
 
-function normalizeKlinePeriodCount(value: number): KlinePeriodCount {
-  if (value === 60 || value === 180 || value === 360) {
-    return value;
+function normalizeKlinePage(bars: MarketKlineBar[], limit: number, before?: string): MarketKlineBar[] {
+  const page = before ? bars.filter((bar) => bar.date < before) : bars;
+  return page.slice(-limit);
+}
+
+function toEastMoneyEnd(before?: string): string {
+  if (!before) {
+    return "20500101";
   }
 
-  return 180;
+  const compact = before.replace(/\D/g, "");
+  if (compact.length >= 8) {
+    return compact.slice(0, 8);
+  }
+
+  return "20500101";
 }
 
 function toNullableNumber(value: unknown): number | null {
