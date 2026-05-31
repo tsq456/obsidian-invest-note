@@ -9,6 +9,7 @@ const MA_SERIES = [
   { name: "MA30", dayCount: 30, color: "#0891b2" },
   { name: "MA60", dayCount: 60, color: "#64748b" }
 ];
+const INITIAL_VISIBLE_KLINE_COUNT = 48;
 
 export type InteractiveMarketChart = {
   update(data: MarketChartData, period: ChartPeriod): void;
@@ -69,6 +70,9 @@ export function createInteractiveMarketChart(
   });
 
   chart.getZr().on("globalout", emitLatest);
+  chart.getZr().on("mousedown", () => container.classList.add("is-chart-dragging"));
+  chart.getZr().on("mouseup", () => container.classList.remove("is-chart-dragging"));
+  chart.getZr().on("globalout", () => container.classList.remove("is-chart-dragging"));
 
   return {
     update(data, period) {
@@ -241,7 +245,7 @@ function buildKlineOption(
       }
     ],
     dataZoom: [
-      { type: "inside", xAxisIndex: [0, 1], start: 0, end: 100, zoomOnMouseWheel: true, moveOnMouseMove: true }
+      buildInsideDataZoom(dates.length)
     ],
     series: [
       {
@@ -279,6 +283,19 @@ function buildCategoryAxis(data: string[], showLabel: boolean): echarts.XAXisCom
     splitLine: { show: false },
     min: "dataMin",
     max: "dataMax"
+  };
+}
+
+function buildInsideDataZoom(dataLength: number): echarts.DataZoomComponentOption {
+  const visibleCount = Math.min(INITIAL_VISIBLE_KLINE_COUNT, dataLength);
+  return {
+    type: "inside",
+    xAxisIndex: [0, 1],
+    startValue: Math.max(0, dataLength - visibleCount),
+    endValue: Math.max(0, dataLength - 1),
+    zoomOnMouseWheel: true,
+    moveOnMouseMove: true,
+    preventDefaultMouseMove: true
   };
 }
 

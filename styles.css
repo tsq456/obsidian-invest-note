@@ -414,6 +414,11 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   min-width: 0;
 }
 
+.stock-note-interactive-chart.is-chart-dragging,
+.stock-note-interactive-chart.is-chart-dragging canvas {
+  cursor: ew-resize !important;
+}
+
 .stock-note-chart-frame {
   position: relative;
   display: inline-block;
