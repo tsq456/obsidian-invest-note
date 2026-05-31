@@ -867,18 +867,20 @@ function renderPriceSummary(parent: HTMLElement, quote: QuoteSnapshot): void {
     text: formatCurrencyPrice(quote.close)
   });
   const changeAmountEl = summary.createSpan({
-    cls: "stock-note-price-change",
+    cls: "stock-note-price-change-value",
     text: formatSignedPrice(quote.changeAmount)
   });
   const changePercentEl = summary.createSpan({
-    cls: "stock-note-price-change",
+    cls: "stock-note-price-change-value",
     text: formatSignedPercent(quote.changePercent)
   });
+  const changeBadgeEl = summary.createSpan({ cls: "stock-note-price-change" });
+  changeBadgeEl.appendChild(changeAmountEl);
+  changeBadgeEl.appendChild(changePercentEl);
 
   if (changeClass) {
     priceEl.addClass(changeClass);
-    changeAmountEl.addClass(changeClass);
-    changePercentEl.addClass(changeClass);
+    changeBadgeEl.addClass(changeClass);
   }
 }
 
