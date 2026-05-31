@@ -204,7 +204,6 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   height: 24px;
   padding: 0 4px;
   border-radius: 4px;
-  background: #ffe1e3;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
@@ -230,8 +229,16 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   color: #fb2c36;
 }
 
+.stock-note-price-change.stock-note-change-up {
+  background: #ffe1e3;
+}
+
 .stock-note-change-down {
   color: #1f8f4d;
+}
+
+.stock-note-price-change.stock-note-change-down {
+  background: #dff3e5;
 }
 
 .stock-note-popover-divider {
@@ -278,12 +285,14 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 }
 
 .stock-note-period-tab {
+  appearance: none;
   height: 24px;
   min-width: 38px;
   padding: 0 7px;
   border: 0;
   border-radius: 4px;
-  background: transparent;
+  background: transparent !important;
+  box-shadow: none !important;
   color: #364153;
   font-size: 12px;
   font-weight: 500;
@@ -309,8 +318,8 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 }
 
 .stock-note-period-tab.is-active {
-  background: #ffffff;
-  color: #2b7fff;
+  background: #ffffff !important;
+  color: #2b7fff !important;
 }
 
 .stock-note-quote-row {

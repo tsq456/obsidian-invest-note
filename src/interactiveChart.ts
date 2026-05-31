@@ -124,7 +124,8 @@ function buildIntradayOption(data: Extract<MarketChartData, { kind: "intraday" }
     animation: false,
     color: ["#d14b3f", "#d99a20"],
     tooltip: {
-      show: false,
+      show: true,
+      showContent: false,
       trigger: "axis",
       axisPointer: { type: "cross", label: { show: false } }
     },
@@ -206,7 +207,8 @@ function buildKlineOption(
       data: MA_SERIES.map((item) => item.name)
     },
     tooltip: {
-      show: false,
+      show: true,
+      showContent: false,
       trigger: "axis",
       axisPointer: { type: "cross", label: { show: false } }
     },
