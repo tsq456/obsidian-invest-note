@@ -1,9 +1,12 @@
 import { Notice, PluginSettingTab, Setting } from "obsidian";
 import type InvestmentNotesPlugin from "./main";
-import type { ChartPeriod } from "./types";
+import type { ChartPeriod, HoverCardWidth } from "./types";
 
 const PERIOD_OPTIONS: Partial<Record<ChartPeriod, string>> = {
   min: "分时",
+  minute5: "5 分钟 K",
+  minute30: "30 分钟 K",
+  minute60: "60 分钟 K",
   daily: "日 K",
   weekly: "周 K",
   monthly: "月 K"
@@ -41,7 +44,7 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("启用悬浮图表")
-      .setDesc("鼠标移入股票、ETF 或场外基金链接时展示预览卡片。")
+      .setDesc("鼠标移入股票或 ETF 链接时展示预览卡片。")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.data.settings.enableHoverPreview)
@@ -82,8 +85,23 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("悬浮卡片大小")
+      .setDesc("控制行情预览卡片宽度，窄卡片会自动压缩指标列和操作区。")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("400", "400 px")
+          .addOption("700", "700 px")
+          .addOption("1000", "1000 px")
+          .setValue(String(this.plugin.data.settings.hoverCardWidth ?? 700))
+          .onChange(async (value) => {
+            this.plugin.data.settings.hoverCardWidth = Number(value) as HoverCardWidth;
+            await this.plugin.savePluginData();
+          })
+      );
+
+    new Setting(containerEl)
       .setName("默认图表周期")
-      .setDesc("股票和 ETF 悬浮预览默认展示的图片周期。场外基金默认展示净值走势。")
+      .setDesc("股票和 ETF 悬浮预览默认展示的图表周期。")
       .addDropdown((dropdown) => {
         Object.entries(PERIOD_OPTIONS).forEach(([value, label]) => dropdown.addOption(value, label));
         dropdown
@@ -98,7 +116,7 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Tushare Token")
-      .setDesc("可选。填写后刷新 A 股列表会优先使用 Tushare stock_basic；ETF 和场外基金使用东方财富/天天基金公开数据。")
+      .setDesc("可选。填写后刷新 A 股列表会优先使用 Tushare stock_basic；ETF 使用东方财富公开数据。")
       .addText((text) =>
         text
           .setPlaceholder("留空使用东方财富")
@@ -111,7 +129,7 @@ export class InvestmentNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("自动更新标的列表")
-      .setDesc("启动时按刷新周期后台检查股票、ETF 和场外基金列表。")
+      .setDesc("启动时按刷新周期后台检查股票和 ETF 列表。")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.data.settings.autoUpdateStockList)

@@ -215,21 +215,8 @@ function expandParagraph(lines: string[], line: number): { start: number; end: n
 
 function paragraphContainsSymbol(lines: string[], paragraph: { start: number; end: number }, symbol: string): boolean {
   const text = lines.slice(paragraph.start, paragraph.end + 1).join("\n");
-  if (symbol.toUpperCase().startsWith("OF")) {
-    const code = symbol.slice(2);
-    return new RegExp(`https?:\\/\\/fund\\.eastmoney\\.com\\/${escapeRegExp(code)}(?:\\.html)?(?:[^\\w]|$)`, "i").test(text);
-  }
 
-  const code = symbol.slice(2);
-  return (
-    new RegExp(`https?:\\/\\/xueqiu\\.com\\/S\\/${escapeRegExp(symbol)}(?:[^\\w]|$)`, "i").test(text) ||
-    (isEtfCode(code) &&
-      new RegExp(`https?:\\/\\/fund\\.eastmoney\\.com\\/${escapeRegExp(code)}(?:\\.html)?(?:[^\\w]|$)`, "i").test(text))
-  );
-}
-
-function isEtfCode(code: string): boolean {
-  return /^(15|51|56|58)\d{4}$/.test(code);
+  return new RegExp(`https?:\\/\\/xueqiu\\.com\\/S\\/${escapeRegExp(symbol)}(?:[^\\w]|$)`, "i").test(text);
 }
 
 function formatSnapshotTimestamp(date: Date): string {

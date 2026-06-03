@@ -85,123 +85,369 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 }
 
 .stock-note-popover {
+  --stock-note-popover-width: 700px;
+  --stock-note-popover-padding: 24px;
+  --stock-note-chart-height: 320px;
   position: fixed;
   z-index: var(--layer-popover, 30);
-  width: min(620px, calc(100vw - 16px));
-  min-height: 320px;
-  padding: 10px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  background: var(--background-primary);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: min(var(--stock-note-popover-width), calc(100vw - 24px));
+  padding: var(--stock-note-popover-padding);
+  border: 0;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow:
+    0 10px 15px rgba(0, 0, 0, 0.10),
+    0 4px 6px rgba(0, 0, 0, 0.10);
+}
+
+.stock-note-popover[data-card-width="400"] {
+  --stock-note-popover-padding: 16px;
+  --stock-note-chart-height: 300px;
+}
+
+.stock-note-popover[data-card-width="1000"] {
+  --stock-note-chart-height: 340px;
 }
 
 .stock-note-popover-header {
   display: flex;
   align-items: center;
-  margin-bottom: 8px;
+  justify-content: space-between;
+  gap: 16px;
+  height: 28px;
 }
 
 .stock-note-popover-symbol {
-  color: var(--text-normal);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  color: #101828;
+}
+
+.stock-note-popover-name {
+  font-size: 18px;
   font-weight: 600;
+  line-height: 28px;
+  letter-spacing: -0.44px;
+}
+
+.stock-note-popover-code {
+  color: #6a7282;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  letter-spacing: -0.15px;
+}
+
+.stock-note-popover-time {
+  color: #6a7282;
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.stock-note-popover[data-card-width="400"] .stock-note-popover-header {
+  align-items: flex-start;
+  height: auto;
+}
+
+.stock-note-popover[data-card-width="400"] .stock-note-popover-name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stock-note-popover[data-card-width="400"] .stock-note-quote-summary {
+  flex-direction: column;
+  gap: 12px;
 }
 
 .stock-note-quote-section {
-  margin-bottom: 8px;
+  margin-top: 0;
+}
+
+.stock-note-quote-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  width: 100%;
 }
 
 .stock-note-price-summary {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  flex: 0 0 230px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
   min-width: 0;
-  margin-bottom: 8px;
+  min-height: 0;
+  margin-bottom: 0;
 }
 
 .stock-note-price-current {
-  color: var(--text-normal);
-  font-size: 32px;
+  color: #101828;
+  font-size: 24px;
   font-weight: 700;
-  line-height: 1;
+  line-height: 32px;
+  letter-spacing: 0.37px;
   white-space: nowrap;
 }
 
 .stock-note-price-change {
-  color: var(--text-normal);
-  font-size: 24px;
-  font-weight: 700;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
   white-space: nowrap;
 }
 
+.stock-note-price-change-value {
+  color: inherit;
+}
+
+.stock-note-popover[data-card-width="400"] .stock-note-price-summary {
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.stock-note-popover[data-card-width="400"] .stock-note-price-current {
+  width: auto;
+  font-size: 22px;
+  line-height: 28px;
+}
+
 .stock-note-change-up {
-  color: #d14b3f;
+  color: #fb2c36;
+}
+
+.stock-note-price-change.stock-note-change-up {
+  background: #ffe1e3;
 }
 
 .stock-note-change-down {
   color: #1f8f4d;
 }
 
+.stock-note-price-change.stock-note-change-down {
+  background: #dff3e5;
+}
+
+.stock-note-popover-divider {
+  width: 100%;
+  height: 1px;
+  background: #e5e7eb;
+}
+
+.stock-note-chart-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
 .stock-note-period-tabs {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
   justify-content: flex-start;
-  gap: 4px;
-  margin-bottom: 8px;
+  height: 28px;
+  margin: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px;
+  background: #f3f4f6;
+  border-radius: 4px;
+  scrollbar-width: none;
+}
+
+.stock-note-period-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.stock-note-popover[data-card-width="400"] .stock-note-period-tabs {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  flex: 1 1 auto;
+  gap: 0;
+  height: 26px;
+  padding: 2px;
+  overflow-x: visible;
 }
 
 .stock-note-period-tab {
+  appearance: none;
   height: 24px;
-  padding: 0 8px;
-  border: 1px solid var(--background-modifier-border);
+  min-width: 38px;
+  padding: 0 7px;
+  border: 0;
   border-radius: 4px;
-  background: var(--background-secondary);
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-  line-height: 22px;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #364153;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
   cursor: pointer;
 }
 
+.stock-note-popover[data-card-width="400"] .stock-note-period-tab {
+  height: 22px;
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  font-size: 11px;
+}
+
+.stock-note-popover[data-card-width="400"] .stock-note-chart-toolbar {
+  align-items: stretch;
+  gap: 8px;
+}
+
+.stock-note-popover[data-card-width="400"] .stock-note-chart-hover-info {
+  display: none;
+}
+
 .stock-note-period-tab.is-active {
-  border-color: var(--interactive-accent);
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
+  background: #ffffff !important;
+  color: #2b7fff !important;
 }
 
 .stock-note-quote-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px 12px;
-  padding: 8px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  background: var(--background-secondary);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  flex: 1 1 auto;
+  gap: 12px 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.stock-note-popover[data-card-width="400"] .stock-note-quote-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
 }
 
 .stock-note-quote-item {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 4px;
   min-width: 0;
   white-space: nowrap;
-  color: var(--text-normal);
-  font-size: var(--font-ui-smaller);
+  color: #101828;
+  font-size: 14px;
+  line-height: 20px;
 }
 
 .stock-note-quote-label,
 .stock-note-quote-loading {
-  color: var(--text-muted);
+  flex: 1 1 0;
+  color: #6a7282;
+  font-weight: 400;
 }
 
 .stock-note-quote-value {
+  flex: 1 1 0;
+  color: #101828;
+  font-weight: 500;
+}
+
+.stock-note-chart-hover-info {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 12px;
+  min-width: 0;
+  color: #101828;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.stock-note-hover-date {
   font-weight: 600;
+}
+
+.stock-note-hover-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stock-note-hover-label {
+  color: #6a7282;
+  font-weight: 400;
+}
+
+.stock-note-hover-value {
+  color: #101828;
+  font-weight: 500;
 }
 
 .stock-note-popover-image-wrap {
   display: grid;
   place-items: center;
-  min-height: 260px;
+  width: 100%;
+  min-height: var(--stock-note-chart-height);
   overflow: hidden;
-  border-radius: 6px;
-  background: var(--background-secondary);
+  border-radius: 4px;
+  background: #f6f6f6;
+}
+
+.stock-note-interactive-chart {
+  position: relative;
+  width: 100%;
+  height: var(--stock-note-chart-height);
+  min-width: 0;
+}
+
+.stock-note-interactive-chart,
+.stock-note-interactive-chart canvas {
+  cursor: ew-resize;
+}
+
+.stock-note-interactive-chart.is-chart-dragging,
+.stock-note-interactive-chart.is-chart-dragging canvas {
+  cursor: ew-resize !important;
+}
+
+.stock-note-interactive-chart.is-history-loading::after,
+.stock-note-interactive-chart.is-history-error::after {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  z-index: 2;
+  padding: 3px 8px;
+  border: 1px solid rgba(71, 119, 217, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #5b6678;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  content: "加载更早数据...";
+}
+
+.stock-note-interactive-chart.is-history-error::after {
+  border-color: rgba(209, 75, 63, 0.22);
+  color: #b5473f;
+  content: "加载失败";
 }
 
 .stock-note-chart-frame {
@@ -252,6 +498,10 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
   justify-content: flex-start;
   gap: 6px;
   margin-top: 8px;
+}
+
+.stock-note-popover-actions:empty {
+  display: none;
 }
 
 .stock-note-color-tools,
@@ -375,23 +625,4 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 .stock-note-popover-loading {
   color: var(--text-muted);
   font-size: var(--font-ui-small);
-}
-
-@media (max-width: 520px) {
-  .stock-note-price-summary {
-    flex-wrap: wrap;
-    gap: 6px 8px;
-  }
-
-  .stock-note-price-current {
-    font-size: 32px;
-  }
-
-  .stock-note-price-change {
-    font-size: 20px;
-  }
-
-  .stock-note-quote-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }

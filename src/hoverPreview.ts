@@ -9,23 +9,25 @@ import {
   type AnnotationTool
 } from "./chartAnnotation";
 import { copyChartSnapshotToClipboard, insertChartSnapshotBelowStockParagraph } from "./chartSnapshot";
+import { createInteractiveMarketChart, type ChartHoverPayload, type InteractiveMarketChart } from "./interactiveChart";
 import type InvestmentNotesPlugin from "./main";
-import { getAssetChartUrl, getAssetSymbolFromHref } from "./stockStore";
-import type { AssetType, ChartPeriod, InvestmentNotesData } from "./types";
+import { fetchMarketChartData, fetchPreviousKlineData } from "./marketData";
+import { getAssetSymbolFromHref } from "./stockStore";
+import type { AssetType, ChartPeriod, HoverCardWidth, InvestmentNotesData, MarketChartData } from "./types";
 
 const CHART_PERIODS: Array<{ value: ChartPeriod; label: string }> = [
   { value: "min", label: "分时" },
+  { value: "minute5", label: "5分" },
+  { value: "minute30", label: "30分" },
+  { value: "minute60", label: "60分" },
   { value: "daily", label: "日K" },
   { value: "weekly", label: "周K" },
   { value: "monthly", label: "月K" }
 ];
-const FUND_CHART_PERIODS: Array<{ value: ChartPeriod; label: string }> = [
-  { value: "netWorth", label: "净值走势" },
-  { value: "accWorth", label: "累计净值" }
-];
 const DEFAULT_PERIOD: ChartPeriod = "min";
-const DEFAULT_FUND_PERIOD: ChartPeriod = "netWorth";
 const TEXT_FONT_STEP = 2;
+const INTRADAY_REFRESH_MS = 15000;
+const KLINE_REFRESH_MS = 60000;
 
 type QuoteSnapshot = {
   date: string;
@@ -38,6 +40,8 @@ type QuoteSnapshot = {
   changePercent: number | null;
   volume: number | null;
   amount: number | null;
+  volumeRatio: number | null;
+  turnover: number | null;
 };
 
 type EastMoneyQuoteResponse = {
@@ -52,15 +56,9 @@ type EastMoneyQuoteResponse = {
     f169?: number;
     f170?: number;
     f86?: number;
+    f50?: number;
+    f168?: number;
   };
-};
-
-type FundQuoteSnapshot = {
-  date: string;
-  name: string;
-  netWorth: number | null;
-  accWorth: number | null;
-  dailyReturn: number | null;
 };
 
 type StockHoverTarget = {
@@ -85,8 +83,11 @@ export class HoverPreview {
   private annotationFontSize = DEFAULT_TEXT_FONT_SIZE;
   private activeLineHint: number | null = null;
   private activeKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
+  private interactiveChart: InteractiveMarketChart | null = null;
+  private activeChartData: MarketChartData | null = null;
+  private chartRefreshTimer: number | null = null;
+  private loadingHistory = false;
   private readonly quoteCache = new Map<string, QuoteSnapshot>();
-  private readonly fundQuoteCache = new Map<string, FundQuoteSnapshot>();
 
   constructor(
     private readonly plugin: InvestmentNotesPlugin,
@@ -182,29 +183,35 @@ export class HoverPreview {
   private show(targetEl: HTMLElement, symbol: string, lineHint: number | null): void {
     this.clearHideTimer();
     this.removePopover();
-    const assetType = getAssetTypeFromSymbol(symbol);
     this.activeSymbol = symbol;
-    this.activePeriod =
-      assetType === "fund" ? DEFAULT_FUND_PERIOD : normalizeMarketChartPeriod(this.data.settings.defaultChartPeriod);
+    this.activePeriod = normalizeMarketChartPeriod(this.data.settings.defaultChartPeriod);
     this.annotationTool = "arrow";
     this.annotationColor = DEFAULT_ANNOTATION_COLOR;
     this.annotationFontSize = DEFAULT_TEXT_FONT_SIZE;
     this.activeLineHint = lineHint;
 
+    const cardWidth = normalizeHoverCardWidth(this.data.settings.hoverCardWidth);
     const popover = document.body.createDiv({ cls: "stock-note-popover" });
+    popover.setAttribute("data-card-width", String(cardWidth));
+    popover.style.setProperty("--stock-note-popover-width", `${cardWidth}px`);
     const header = popover.createDiv({ cls: "stock-note-popover-header" });
-    header.createSpan({
-      cls: "stock-note-popover-symbol",
-      text: this.getDisplayTitle(symbol)
+    this.renderDisplayTitle(header, symbol);
+    const timeEl = header.createSpan({
+      cls: "stock-note-popover-time",
+      text: "--"
     });
 
     const quoteEl = popover.createDiv({ cls: "stock-note-quote-section" });
-    void this.renderQuote(symbol, quoteEl);
+    void this.renderQuote(symbol, quoteEl, timeEl);
 
-    const periodControls = popover.createDiv({ cls: "stock-note-period-tabs" });
+    const divider = popover.createDiv({ cls: "stock-note-popover-divider" });
+    divider.ariaHidden = "true";
+    const chartToolbar = popover.createDiv({ cls: "stock-note-chart-toolbar" });
+    const periodControls = chartToolbar.createDiv({ cls: "stock-note-period-tabs" });
+    const hoverInfoEl = chartToolbar.createDiv({ cls: "stock-note-chart-hover-info", text: "--" });
     const imageWrap = popover.createDiv({ cls: "stock-note-popover-image-wrap" });
     const actions = popover.createDiv({ cls: "stock-note-popover-actions" });
-    getChartPeriods(assetType).forEach((period) => {
+    getChartPeriods().forEach((period) => {
       const button = periodControls.createEl("button", {
         cls: "stock-note-period-tab",
         text: period.label,
@@ -219,13 +226,9 @@ export class HoverPreview {
         this.activePeriod = period.value;
         periodControls.querySelectorAll(".stock-note-period-tab").forEach((el) => el.removeClass("is-active"));
         button.addClass("is-active");
-        this.renderChart(symbol, imageWrap);
+        void this.renderChart(symbol, imageWrap, hoverInfoEl);
       });
     });
-
-    this.renderSnapshotControls(actions, symbol);
-    this.renderAnnotationControls(actions);
-    this.renderChart(symbol, imageWrap);
 
     popover.addEventListener("mouseenter", () => this.clearHideTimer());
     popover.addEventListener("mouseleave", () => this.scheduleHide());
@@ -247,6 +250,7 @@ export class HoverPreview {
     document.body.appendChild(popover);
     this.positionPopover(targetEl, popover);
     this.popoverEl = popover;
+    void this.renderChart(symbol, imageWrap, hoverInfoEl);
   }
 
   private async copyCurrentChartSnapshot(symbol: string, button: HTMLButtonElement): Promise<void> {
@@ -287,42 +291,27 @@ export class HoverPreview {
     }
   }
 
-  private async renderQuote(symbol: string, quoteEl: HTMLElement): Promise<void> {
+  private async renderQuote(symbol: string, quoteEl: HTMLElement, timeEl: HTMLElement): Promise<void> {
     quoteEl.empty();
     quoteEl.createSpan({ cls: "stock-note-quote-loading", text: "行情加载中..." });
 
     try {
-      if (getAssetTypeFromSymbol(symbol) === "fund") {
-        const quote = await this.getFundQuoteSnapshot(symbol);
-        if (symbol !== this.activeSymbol) {
-          return;
-        }
-
-        quoteEl.empty();
-        renderFundSummary(quoteEl, quote);
-        const detailEl = quoteEl.createDiv({ cls: "stock-note-quote-row stock-note-fund-quote-row" });
-        addQuoteItem(detailEl, "日期", quote.date);
-        addQuoteItem(detailEl, "单位净值", formatNetWorth(quote.netWorth));
-        addQuoteItem(detailEl, "累计净值", formatNetWorth(quote.accWorth));
-        addQuoteItem(detailEl, "日涨幅", formatSignedPercent(quote.dailyReturn), getValueChangeClass(quote.dailyReturn));
-        return;
-      }
-
       const quote = await this.getQuoteSnapshot(symbol);
       if (symbol !== this.activeSymbol) {
         return;
       }
 
       quoteEl.empty();
-      renderPriceSummary(quoteEl, quote);
-      const detailEl = quoteEl.createDiv({ cls: "stock-note-quote-row" });
-      addQuoteItem(detailEl, "日期", quote.date);
-      addQuoteItem(detailEl, "开盘", formatPrice(quote.open), getPriceChangeClass(quote.open, quote.previousClose));
-      addQuoteItem(detailEl, "最高", formatPrice(quote.high), getPriceChangeClass(quote.high, quote.previousClose));
-      addQuoteItem(detailEl, "最低", formatPrice(quote.low), getPriceChangeClass(quote.low, quote.previousClose));
-      addQuoteItem(detailEl, "收盘", formatPrice(quote.close), getPriceChangeClass(quote.close, quote.previousClose));
+      timeEl.setText(quote.date === "-" ? "--" : `${quote.date} 15:00`);
+      const summaryEl = quoteEl.createDiv({ cls: "stock-note-quote-summary" });
+      renderPriceSummary(summaryEl, quote);
+      const detailEl = summaryEl.createDiv({ cls: "stock-note-quote-row" });
+      addQuoteItem(detailEl, "最高价", formatPrice(quote.high), getPriceChangeClass(quote.high, quote.previousClose));
       addQuoteItem(detailEl, "成交量", formatVolumeHands(quote.volume));
+      addQuoteItem(detailEl, "开盘价", formatPrice(quote.open), getPriceChangeClass(quote.open, quote.previousClose));
+      addQuoteItem(detailEl, "最低价", formatPrice(quote.low), getPriceChangeClass(quote.low, quote.previousClose));
       addQuoteItem(detailEl, "成交额", formatAmount(quote.amount));
+      addQuoteItem(detailEl, "换手率", formatPercent(quote.turnover));
     } catch (error) {
       console.warn("[investment-notes] Failed to load quote snapshot", error);
       if (symbol === this.activeSymbol) {
@@ -332,49 +321,132 @@ export class HoverPreview {
     }
   }
 
-  private renderChart(symbol: string, imageWrap: HTMLElement): void {
+  private async renderChart(symbol: string, imageWrap: HTMLElement, hoverInfoEl: HTMLElement): Promise<void> {
+    this.clearChartResources();
     this.annotationController?.destroy();
     this.annotationController = null;
+    this.activeChartData = null;
+    this.loadingHistory = false;
     imageWrap.empty();
+    hoverInfoEl.setText("--");
     const loading = imageWrap.createDiv({ cls: "stock-note-popover-loading", text: "图表加载中..." });
     const period = this.activePeriod;
-    const chartUrl = getAssetChartUrl(symbol, this.activePeriod);
-    if (!chartUrl) {
-      loading.setText("图表暂不可用");
-      return;
-    }
 
-    const chartFrame = imageWrap.createDiv({ cls: "stock-note-chart-frame" });
-    const img = imageWrap.createEl("img", {
-      cls: "stock-note-popover-image",
-      attr: {
-        src: chartUrl,
-        alt: `${symbol} 图表`
+    const chartEl = imageWrap.createDiv({ cls: "stock-note-interactive-chart" });
+    let historyFeedbackTimer: number | null = null;
+    const setHistoryState = (state: { loading: boolean; error?: boolean }) => {
+      if ((state.loading || state.error !== undefined) && historyFeedbackTimer !== null) {
+        window.clearTimeout(historyFeedbackTimer);
+        historyFeedbackTimer = null;
       }
-    });
-    chartFrame.appendChild(img);
-    const annotationCanvas = chartFrame.createEl("canvas", {
-      cls: "stock-note-annotation-canvas"
-    });
-    img.hide();
-    annotationCanvas.hide();
 
-    img.addEventListener("load", () => {
-      if (symbol !== this.activeSymbol || period !== this.activePeriod || !imageWrap.contains(chartFrame)) {
+      chartEl.toggleClass("is-history-loading", state.loading);
+      if (state.error) {
+        chartEl.addClass("is-history-error");
+        historyFeedbackTimer = window.setTimeout(() => {
+          chartEl.removeClass("is-history-error");
+          historyFeedbackTimer = null;
+        }, 1800);
+      } else if (state.error === false) {
+        chartEl.removeClass("is-history-error");
+      }
+    };
+    try {
+      const chart = createInteractiveMarketChart(chartEl, {
+        onHoverChange: (payload) => renderChartHoverInfo(hoverInfoEl, payload),
+        onNeedMoreHistory: (state) => {
+          void this.loadPreviousHistory(symbol, period, chart, setHistoryState, state.suggestedLimit);
+        },
+        onHistoryLoadingChange: setHistoryState
+      });
+      this.interactiveChart = chart;
+      await this.updateInteractiveChart(symbol, period, chart, imageWrap, loading, hoverInfoEl);
+      this.chartRefreshTimer = window.setInterval(() => {
+        void this.updateInteractiveChart(symbol, period, chart, imageWrap, loading, hoverInfoEl, true);
+      }, period === "min" ? INTRADAY_REFRESH_MS : KLINE_REFRESH_MS);
+    } catch (error) {
+      console.warn("[investment-notes] Failed to render interactive chart", error);
+      chartEl.remove();
+      loading.setText(`图表暂不可用：${formatErrorMessage(error)}`);
+    }
+  }
+
+  private async updateInteractiveChart(
+    symbol: string,
+    period: ChartPeriod,
+    chart: InteractiveMarketChart,
+    imageWrap: HTMLElement,
+    loading: HTMLElement,
+    hoverInfoEl: HTMLElement,
+    silent = false
+  ): Promise<void> {
+    try {
+      const data = await fetchMarketChartData(symbol, period);
+      if (symbol !== this.activeSymbol || period !== this.activePeriod || !imageWrap.isConnected) {
         return;
       }
 
+      this.activeChartData = data;
+      chart.update(data, period);
+      chart.resize();
+      renderChartHoverInfo(hoverInfoEl, getLatestHoverPayload(data));
       loading.hide();
-      img.show();
-      annotationCanvas.show();
-      this.annotationController = new ChartAnnotationController(annotationCanvas, img);
-      this.annotationController.setTool(this.annotationTool);
-      this.annotationController.setColor(this.annotationColor);
-      this.annotationController.setFontSize(this.annotationFontSize);
-    });
-    img.addEventListener("error", () => {
-      loading.setText("图表暂不可用");
-    });
+    } catch (error) {
+      console.warn("[investment-notes] Failed to update interactive chart", error);
+      if (!silent) {
+        loading.setText(`图表暂不可用：${formatErrorMessage(error)}`);
+      }
+    }
+  }
+
+  private async loadPreviousHistory(
+    symbol: string,
+    period: ChartPeriod,
+    chart: InteractiveMarketChart,
+    onHistoryLoadingChange?: (state: { loading: boolean; error?: boolean }) => void,
+    limit?: number
+  ): Promise<void> {
+    if (
+      this.loadingHistory ||
+      period === "min" ||
+      !this.activeChartData ||
+      this.activeChartData.kind !== "kline" ||
+      this.activeChartData.bars.length === 0
+    ) {
+      return;
+    }
+
+    this.loadingHistory = true;
+    onHistoryLoadingChange?.({ loading: true });
+    const klinePeriod = period as Exclude<ChartPeriod, "min">;
+    const currentData = this.activeChartData as Extract<MarketChartData, { kind: "kline" }>;
+    const before = currentData.bars[0].date;
+    try {
+      const previous = await fetchPreviousKlineData(symbol, klinePeriod, before, limit);
+      if (symbol !== this.activeSymbol || period !== this.activePeriod || previous.bars.length === 0) {
+        return;
+      }
+
+      const activeData: Extract<MarketChartData, { kind: "kline" }> =
+        this.activeChartData?.kind === "kline" ? this.activeChartData : currentData;
+      const knownDates = new Set(activeData.bars.map((bar) => bar.date));
+      const olderBars = previous.bars.filter((bar) => !knownDates.has(bar.date));
+      if (olderBars.length === 0) {
+        return;
+      }
+
+      this.activeChartData = {
+        ...activeData,
+        bars: [...olderBars, ...activeData.bars]
+      };
+      chart.prependHistory({ ...previous, bars: olderBars });
+    } catch (error) {
+      console.warn("[investment-notes] Failed to load previous kline history", error);
+      onHistoryLoadingChange?.({ loading: false, error: true });
+    } finally {
+      this.loadingHistory = false;
+      onHistoryLoadingChange?.({ loading: false });
+    }
   }
 
   private renderSnapshotControls(actions: HTMLElement, symbol: string): void {
@@ -520,21 +592,13 @@ export class HoverPreview {
     return quote;
   }
 
-  private async getFundQuoteSnapshot(symbol: string): Promise<FundQuoteSnapshot> {
-    const cached = this.fundQuoteCache.get(symbol);
-    if (cached) {
-      return cached;
-    }
-
-    const quote = await fetchFundQuoteSnapshot(symbol);
-    this.fundQuoteCache.set(symbol, quote);
-    return quote;
-  }
-
-  private getDisplayTitle(symbol: string): string {
+  private renderDisplayTitle(parent: HTMLElement, symbol: string): void {
     const asset = this.plugin.stockStore.getBySymbol(symbol);
-    const code = toDisplayCode(symbol);
-    return asset ? `${asset.name}（${code}）` : code;
+    const title = parent.createSpan({ cls: "stock-note-popover-symbol" });
+    title.createSpan({ cls: "stock-note-popover-name", text: asset?.name ?? toDisplayCode(symbol) });
+    if (asset) {
+      title.createSpan({ cls: "stock-note-popover-code", text: toDisplayCode(symbol) });
+    }
   }
 
   private positionPopover(targetEl: HTMLElement, popover: HTMLElement): void {
@@ -635,6 +699,7 @@ export class HoverPreview {
 
   private removePopover(): void {
     this.clearPendingShow();
+    this.clearChartResources();
     if (this.activeKeydownHandler) {
       document.removeEventListener("keydown", this.activeKeydownHandler, true);
       this.activeKeydownHandler = null;
@@ -644,6 +709,17 @@ export class HoverPreview {
     this.popoverEl?.remove();
     this.popoverEl = null;
   }
+
+  private clearChartResources(): void {
+    if (this.chartRefreshTimer !== null) {
+      window.clearInterval(this.chartRefreshTimer);
+      this.chartRefreshTimer = null;
+    }
+
+    this.interactiveChart?.dispose();
+    this.interactiveChart = null;
+    this.activeChartData = null;
+  }
 }
 
 function normalizeHoverDelay(value: number): number {
@@ -652,6 +728,56 @@ function normalizeHoverDelay(value: number): number {
   }
 
   return Math.min(5000, Math.floor(value));
+}
+
+function normalizeHoverCardWidth(value: number): HoverCardWidth {
+  if (value === 400 || value === 700 || value === 1000) {
+    return value;
+  }
+
+  return 700;
+}
+
+function formatErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.length > 48 ? `${message.slice(0, 48)}...` : message;
+}
+
+function renderChartHoverInfo(parent: HTMLElement, payload: ChartHoverPayload | null): void {
+  parent.empty();
+  if (!payload) {
+    parent.setText("--");
+    return;
+  }
+
+  if (payload.kind === "intraday") {
+    parent.createSpan({ cls: "stock-note-hover-date", text: payload.point.time.slice(5) });
+    addHoverItem(parent, "价", formatPrice(payload.point.close));
+    addHoverItem(parent, "均", formatPrice(payload.point.average));
+    addHoverItem(parent, "量", formatVolumeHands(payload.point.volume));
+    return;
+  }
+
+  parent.createSpan({ cls: "stock-note-hover-date", text: payload.bar.date });
+  addHoverItem(parent, "收", formatPrice(payload.bar.close));
+  addHoverItem(parent, "涨跌", formatSignedPercent(payload.bar.changePercent));
+  addHoverItem(parent, "量", formatVolumeHands(payload.bar.volume));
+}
+
+function addHoverItem(parent: HTMLElement, label: string, value: string): void {
+  const item = parent.createSpan({ cls: "stock-note-hover-item" });
+  item.createSpan({ cls: "stock-note-hover-label", text: label });
+  item.createSpan({ cls: "stock-note-hover-value", text: value });
+}
+
+function getLatestHoverPayload(data: Awaited<ReturnType<typeof fetchMarketChartData>>): ChartHoverPayload | null {
+  if (data.kind === "intraday") {
+    const point = data.points[data.points.length - 1];
+    return point ? { kind: "intraday", point } : null;
+  }
+
+  const bar = data.bars[data.bars.length - 1];
+  return bar ? { kind: "kline", bar } : null;
 }
 
 type StockNoteIcon =
@@ -726,7 +852,7 @@ async function fetchQuoteSnapshot(symbol: string): Promise<QuoteSnapshot> {
   }
 
   const response = await requestUrl({
-    url: `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fields=f43,f44,f45,f46,f47,f48,f60,f86,f169,f170`,
+    url: `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fields=f43,f44,f45,f46,f47,f48,f50,f60,f86,f168,f169,f170`,
     method: "GET",
     headers: {
       Accept: "application/json,text/plain,*/*",
@@ -749,65 +875,10 @@ async function fetchQuoteSnapshot(symbol: string): Promise<QuoteSnapshot> {
     changeAmount: toNullableNumber(data.f169),
     changePercent: toNullableNumber(data.f170),
     volume: toNullableNumber(data.f47),
-    amount: toNullableNumber(data.f48)
+    amount: toNullableNumber(data.f48),
+    volumeRatio: toNullableNumber(data.f50),
+    turnover: toNullableNumber(data.f168)
   };
-}
-
-async function fetchFundQuoteSnapshot(symbol: string): Promise<FundQuoteSnapshot> {
-  const match = symbol.toUpperCase().match(/^OF(\d{6})$/);
-  if (!match) {
-    throw new Error(`Unsupported fund symbol: ${symbol}`);
-  }
-
-  const code = match[1];
-  const response = await requestUrl({
-    url: `https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`,
-    method: "GET",
-    headers: {
-      Accept: "application/javascript,text/plain,*/*",
-      Referer: `https://fund.eastmoney.com/${code}.html`,
-      "User-Agent": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Obsidian Investment Notes"
-    }
-  });
-  const text = response.text;
-  const name = parseStringVar(text, "fS_name") ?? code;
-  const netWorthTrend = parseJsonVar<Array<{ x?: number; y?: number; equityReturn?: number }>>(text, "Data_netWorthTrend");
-  const accWorthTrend = parseJsonVar<Array<[number, number]>>(text, "Data_ACWorthTrend");
-  const latestNetWorth = netWorthTrend && netWorthTrend.length > 0 ? netWorthTrend[netWorthTrend.length - 1] : null;
-  const latestAccWorth = accWorthTrend && accWorthTrend.length > 0 ? accWorthTrend[accWorthTrend.length - 1] : null;
-
-  return {
-    name,
-    date: latestNetWorth?.x ? formatDate(new Date(latestNetWorth.x)) : "-",
-    netWorth: toNullableNumber(latestNetWorth?.y),
-    accWorth: toNullableNumber(latestAccWorth?.[1]),
-    dailyReturn: toNullableNumber(latestNetWorth?.equityReturn)
-  };
-}
-
-function parseStringVar(text: string, name: string): string | null {
-  const match = text.match(new RegExp(`var\\s+${name}\\s*=\\s*"([^"]*)"`));
-  return match ? match[1] : null;
-}
-
-function parseJsonVar<T>(text: string, name: string): T | null {
-  const startMatch = text.match(new RegExp(`var\\s+${name}\\s*=`));
-  if (!startMatch || startMatch.index === undefined) {
-    return null;
-  }
-
-  const start = startMatch.index + startMatch[0].length;
-  const end = text.indexOf(";", start);
-  if (end < 0) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(text.slice(start, end).trim()) as T;
-  } catch (error) {
-    console.warn(`[investment-notes] Failed to parse ${name}`, error);
-    return null;
-  }
 }
 
 function renderPriceSummary(parent: HTMLElement, quote: QuoteSnapshot): void {
@@ -818,36 +889,20 @@ function renderPriceSummary(parent: HTMLElement, quote: QuoteSnapshot): void {
     text: formatCurrencyPrice(quote.close)
   });
   const changeAmountEl = summary.createSpan({
-    cls: "stock-note-price-change",
+    cls: "stock-note-price-change-value",
     text: formatSignedPrice(quote.changeAmount)
   });
   const changePercentEl = summary.createSpan({
-    cls: "stock-note-price-change",
+    cls: "stock-note-price-change-value",
     text: formatSignedPercent(quote.changePercent)
   });
+  const changeBadgeEl = summary.createSpan({ cls: "stock-note-price-change" });
+  changeBadgeEl.appendChild(changeAmountEl);
+  changeBadgeEl.appendChild(changePercentEl);
 
   if (changeClass) {
     priceEl.addClass(changeClass);
-    changeAmountEl.addClass(changeClass);
-    changePercentEl.addClass(changeClass);
-  }
-}
-
-function renderFundSummary(parent: HTMLElement, quote: FundQuoteSnapshot): void {
-  const changeClass = getValueChangeClass(quote.dailyReturn);
-  const summary = parent.createDiv({ cls: "stock-note-price-summary stock-note-fund-summary" });
-  const netWorthEl = summary.createSpan({
-    cls: "stock-note-price-current",
-    text: formatNetWorth(quote.netWorth)
-  });
-  const dailyReturnEl = summary.createSpan({
-    cls: "stock-note-price-change",
-    text: formatSignedPercent(quote.dailyReturn)
-  });
-
-  if (changeClass) {
-    netWorthEl.addClass(changeClass);
-    dailyReturnEl.addClass(changeClass);
+    changeBadgeEl.addClass(changeClass);
   }
 }
 
@@ -876,16 +931,12 @@ function getValueChangeClass(value: number | null): string | undefined {
   return value > 0 ? "stock-note-change-up" : "stock-note-change-down";
 }
 
-function getChartPeriods(assetType: AssetType): Array<{ value: ChartPeriod; label: string }> {
-  return assetType === "fund" ? FUND_CHART_PERIODS : CHART_PERIODS;
+function getChartPeriods(): Array<{ value: ChartPeriod; label: string }> {
+  return CHART_PERIODS;
 }
 
 function getAssetTypeFromSymbol(symbol: string): AssetType {
   const normalized = symbol.toUpperCase();
-  if (normalized.startsWith("OF")) {
-    return "fund";
-  }
-
   if (isEtfSymbol(normalized)) {
     return "etf";
   }
@@ -913,11 +964,6 @@ function toEastMoneySecid(symbol: string): string | null {
 }
 
 function toDisplayCode(symbol: string): string {
-  const fundMatch = symbol.toUpperCase().match(/^OF(\d{6})$/);
-  if (fundMatch) {
-    return fundMatch[1];
-  }
-
   const match = symbol.toUpperCase().match(/^(SH|SZ|BJ)(\d{6})$/);
   return match ? `${match[2]}.${match[1]}` : symbol;
 }
@@ -937,12 +983,8 @@ function formatPrice(value: number | null): string {
   return value === null ? "-" : value.toFixed(2);
 }
 
-function formatNetWorth(value: number | null): string {
-  return value === null ? "-" : value.toFixed(4);
-}
-
 function formatCurrencyPrice(value: number | null): string {
-  return value === null ? "-" : `￥${value.toFixed(2)}`;
+  return value === null ? "-" : value.toFixed(2);
 }
 
 function formatSignedPrice(value: number | null): string {
@@ -959,6 +1001,18 @@ function formatSignedPercent(value: number | null): string {
   }
 
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function formatPercent(value: number | null): string {
+  if (value === null) {
+    return "-";
+  }
+
+  return `${value.toFixed(2)}%`;
+}
+
+function formatRatio(value: number | null): string {
+  return value === null ? "-" : value.toFixed(2);
 }
 
 function formatVolumeHands(value: number | null): string {

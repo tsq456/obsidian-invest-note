@@ -11,7 +11,7 @@ import { getAssetSymbolFromHref } from "./stockStore";
 import type { InvestmentNotesSettings } from "./types";
 
 const MARKDOWN_STOCK_LINK_REGEX =
-  /\[(\$[^\]\n]+?\$)\]\((https?:\/\/(?:xueqiu\.com\/S\/(?:SH|SZ|BJ)\d{6}|fund\.eastmoney\.com\/\d{6}(?:\.html)?)[^\)]*)\)/gi;
+  /\[(\$[^\]\n]+?\$)\]\((https?:\/\/xueqiu\.com\/S\/(?:SH|SZ|BJ)\d{6}[^\)]*)\)/gi;
 const RENDERED_STOCK_LABEL_REGEX = /^\$\s*(.+?)\s*\$$/;
 
 export function decorateRenderedStockLinks(el: HTMLElement): void {
@@ -103,10 +103,6 @@ function buildDecorations(view: EditorView): DecorationSet {
 }
 
 function getAssetTypeFromSymbol(symbol: string): string {
-  if (symbol.startsWith("OF")) {
-    return "fund";
-  }
-
   if (isEtfSymbol(symbol)) {
     return "etf";
   }
