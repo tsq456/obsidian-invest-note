@@ -409,14 +409,45 @@ body:not(.stock-note-link-pill-disabled) a.stock-note-link {
 }
 
 .stock-note-interactive-chart {
+  position: relative;
   width: 100%;
   height: var(--stock-note-chart-height);
   min-width: 0;
 }
 
+.stock-note-interactive-chart,
+.stock-note-interactive-chart canvas {
+  cursor: ew-resize;
+}
+
 .stock-note-interactive-chart.is-chart-dragging,
 .stock-note-interactive-chart.is-chart-dragging canvas {
   cursor: ew-resize !important;
+}
+
+.stock-note-interactive-chart.is-history-loading::after,
+.stock-note-interactive-chart.is-history-error::after {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  z-index: 2;
+  padding: 3px 8px;
+  border: 1px solid rgba(71, 119, 217, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #5b6678;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  content: "加载更早数据...";
+}
+
+.stock-note-interactive-chart.is-history-error::after {
+  border-color: rgba(209, 75, 63, 0.22);
+  color: #b5473f;
+  content: "加载失败";
 }
 
 .stock-note-chart-frame {

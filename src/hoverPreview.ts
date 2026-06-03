@@ -333,12 +333,31 @@ export class HoverPreview {
     const period = this.activePeriod;
 
     const chartEl = imageWrap.createDiv({ cls: "stock-note-interactive-chart" });
+    let historyFeedbackTimer: number | null = null;
+    const setHistoryState = (state: { loading: boolean; error?: boolean }) => {
+      if ((state.loading || state.error !== undefined) && historyFeedbackTimer !== null) {
+        window.clearTimeout(historyFeedbackTimer);
+        historyFeedbackTimer = null;
+      }
+
+      chartEl.toggleClass("is-history-loading", state.loading);
+      if (state.error) {
+        chartEl.addClass("is-history-error");
+        historyFeedbackTimer = window.setTimeout(() => {
+          chartEl.removeClass("is-history-error");
+          historyFeedbackTimer = null;
+        }, 1800);
+      } else if (state.error === false) {
+        chartEl.removeClass("is-history-error");
+      }
+    };
     try {
       const chart = createInteractiveMarketChart(chartEl, {
         onHoverChange: (payload) => renderChartHoverInfo(hoverInfoEl, payload),
-        onNeedMoreHistory: () => {
-          void this.loadPreviousHistory(symbol, period, chart, hoverInfoEl);
-        }
+        onNeedMoreHistory: (state) => {
+          void this.loadPreviousHistory(symbol, period, chart, setHistoryState, state.suggestedLimit);
+        },
+        onHistoryLoadingChange: setHistoryState
       });
       this.interactiveChart = chart;
       await this.updateInteractiveChart(symbol, period, chart, imageWrap, loading, hoverInfoEl);
@@ -384,7 +403,8 @@ export class HoverPreview {
     symbol: string,
     period: ChartPeriod,
     chart: InteractiveMarketChart,
-    hoverInfoEl: HTMLElement
+    onHistoryLoadingChange?: (state: { loading: boolean; error?: boolean }) => void,
+    limit?: number
   ): Promise<void> {
     if (
       this.loadingHistory ||
@@ -397,11 +417,12 @@ export class HoverPreview {
     }
 
     this.loadingHistory = true;
+    onHistoryLoadingChange?.({ loading: true });
     const klinePeriod = period as Exclude<ChartPeriod, "min">;
     const currentData = this.activeChartData as Extract<MarketChartData, { kind: "kline" }>;
     const before = currentData.bars[0].date;
     try {
-      const previous = await fetchPreviousKlineData(symbol, klinePeriod, before);
+      const previous = await fetchPreviousKlineData(symbol, klinePeriod, before, limit);
       if (symbol !== this.activeSymbol || period !== this.activePeriod || previous.bars.length === 0) {
         return;
       }
@@ -419,11 +440,12 @@ export class HoverPreview {
         bars: [...olderBars, ...activeData.bars]
       };
       chart.prependHistory({ ...previous, bars: olderBars });
-      renderChartHoverInfo(hoverInfoEl, getLatestHoverPayload(this.activeChartData));
     } catch (error) {
       console.warn("[investment-notes] Failed to load previous kline history", error);
+      onHistoryLoadingChange?.({ loading: false, error: true });
     } finally {
       this.loadingHistory = false;
+      onHistoryLoadingChange?.({ loading: false });
     }
   }
 

@@ -27,6 +27,7 @@ const KLINE_PERIOD: Record<MarketKlinePeriod, number> = {
   monthly: 103
 };
 const KLINE_PAGE_LIMIT = 60;
+const KLINE_HISTORY_PAGE_LIMIT = 90;
 
 type MarketKlinePeriod = Exclude<ChartPeriod, "min">;
 type SinaDirectKlinePeriod = "minute5" | "minute30" | "minute60" | "daily";
@@ -74,9 +75,10 @@ export async function fetchMarketChartData(
 export async function fetchPreviousKlineData(
   symbol: string,
   period: Exclude<ChartPeriod, "min">,
-  before: string
+  before: string,
+  limit = KLINE_HISTORY_PAGE_LIMIT
 ): Promise<Extract<MarketChartData, { kind: "kline" }>> {
-  return fetchKlineData(symbol, period, KLINE_PAGE_LIMIT, before);
+  return fetchKlineData(symbol, period, limit, before);
 }
 
 async function fetchIntradayData(symbol: string): Promise<MarketChartData> {

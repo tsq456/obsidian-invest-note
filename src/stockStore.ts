@@ -1,7 +1,13 @@
 import { Notice, Plugin, requestUrl } from "obsidian";
 import { pinyin } from "pinyin-pro";
 import seedStocks from "../data/stocks.seed.json";
-import type { ChartPeriod, InvestmentAsset, InvestmentNotesData, StockInfo, StockMarket } from "./types";
+import type {
+  ChartPeriod,
+  InvestmentAsset,
+  InvestmentNotesData,
+  StockInfo,
+  StockMarket
+} from "./types";
 
 const EASTMONEY_BASE_QUERY =
   "/api/qt/clist/get?pn=1&pz=100&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fields=f12,f13,f14";
@@ -528,6 +534,16 @@ export function getAssetSymbolFromHref(href: string): string | null {
   const xueqiuMatch = href.match(/https?:\/\/xueqiu\.com\/S\/((?:SH|SZ|BJ)\d{6})/i);
   if (xueqiuMatch) {
     return xueqiuMatch[1].toUpperCase();
+  }
+
+  const eastMoneyMatch = href.match(/https?:\/\/quote\.eastmoney\.com\/(?:[a-z]+\/)?((?:sh|sz|bj)\d{6}|zs\d{6})\.html/i);
+  if (eastMoneyMatch) {
+    const raw = eastMoneyMatch[1].toUpperCase();
+    if (raw.startsWith("ZS")) {
+      return `SH${raw.slice(2)}`;
+    }
+
+    return `${raw.slice(0, 2)}${raw.slice(2)}`;
   }
 
   return null;

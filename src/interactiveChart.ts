@@ -10,6 +10,10 @@ const MA_SERIES = [
   { name: "MA60", dayCount: 60, color: "#64748b" }
 ];
 const INITIAL_VISIBLE_KLINE_COUNT = 48;
+const HISTORY_PREFETCH_MIN_BUFFER_COUNT = 20;
+const HISTORY_PREFETCH_FAST_BUFFER_COUNT = 60;
+const HISTORY_EDGE_WAIT_THRESHOLD = 2;
+const HISTORY_EDGE_CONTINUE_COUNT = 30;
 
 export type InteractiveMarketChart = {
   update(data: MarketChartData, period: ChartPeriod): void;
@@ -30,7 +34,8 @@ export type ChartHoverPayload =
 
 type InteractiveMarketChartOptions = {
   onHoverChange?: (payload: ChartHoverPayload | null) => void;
-  onNeedMoreHistory?: () => void;
+  onNeedMoreHistory?: (state: { edgeWaiting: boolean; suggestedLimit: number }) => void;
+  onHistoryLoadingChange?: (state: { loading: boolean; error?: boolean }) => void;
 };
 
 export function createInteractiveMarketChart(
@@ -41,44 +46,130 @@ export function createInteractiveMarketChart(
   let currentData: MarketChartData | null = null;
   let currentPeriod: ChartPeriod | null = null;
   let requestingHistory = false;
+  let lastHoverIndex: number | null = null;
+  let edgeWaitingForHistory = false;
+  let lastHistoryRequestAt = 0;
+  let slowHistoryRequestCount = 0;
+  let draggingChart = false;
 
   const emitLatest = () => {
-    options.onHoverChange?.(getHoverPayload(currentData, getPointCount(currentData) - 1));
+    lastHoverIndex = getPointCount(currentData) - 1;
+    options.onHoverChange?.(getHoverPayload(currentData, lastHoverIndex));
+  };
+
+  const emitHoverAt = (index: number | null) => {
+    if (index === null) {
+      return;
+    }
+
+    lastHoverIndex = index;
+    options.onHoverChange?.(getHoverPayload(currentData, index));
+  };
+
+  const resetKlineWindow = () => {
+    if (!currentData || currentData.kind !== "kline") {
+      return;
+    }
+
+    const dataLength = currentData.bars.length;
+    chart.dispatchAction({
+      type: "dataZoom",
+      dataZoomIndex: 0,
+      startValue: Math.max(0, dataLength - INITIAL_VISIBLE_KLINE_COUNT),
+      endValue: Math.max(0, dataLength - 1)
+    });
+    emitLatest();
   };
 
   chart.on("updateAxisPointer", (event: unknown) => {
     const index = getAxisPointerIndex(event);
-    if (index === null) {
+    emitHoverAt(index);
+  });
+
+  const requestMoreHistory = (edgeWaiting: boolean, suggestedLimit: number) => {
+    if (!currentData || currentData.kind !== "kline" || requestingHistory) {
       return;
     }
-    options.onHoverChange?.(getHoverPayload(currentData, index));
-  });
+
+    requestingHistory = true;
+    edgeWaitingForHistory = edgeWaiting;
+    lastHistoryRequestAt = Date.now();
+    options.onHistoryLoadingChange?.({ loading: true });
+    options.onNeedMoreHistory?.({ edgeWaiting, suggestedLimit });
+    window.setTimeout(() => {
+      requestingHistory = false;
+    }, 600);
+  };
 
   chart.on("datazoom", () => {
     if (!currentData || currentData.kind !== "kline" || requestingHistory) {
       return;
     }
 
-    const range = getInsideDataZoomRange(chart);
-    if (range !== null && range <= 1) {
-      requestingHistory = true;
-      options.onNeedMoreHistory?.();
-      window.setTimeout(() => {
-        requestingHistory = false;
-      }, 600);
+    const range = getVisibleKlineWindow(chart, currentData.bars.length);
+    const visibleCount = range.endIndex - range.startIndex + 1;
+    const prefetchBuffer = getHistoryPrefetchBuffer(visibleCount, slowHistoryRequestCount);
+    if (range.startIndex <= prefetchBuffer) {
+      const edgeWaiting = range.startIndex <= HISTORY_EDGE_WAIT_THRESHOLD;
+      requestMoreHistory(edgeWaiting, edgeWaiting || slowHistoryRequestCount > 0 ? 180 : 90);
     }
   });
 
   chart.getZr().on("globalout", emitLatest);
-  chart.getZr().on("mousedown", () => container.classList.add("is-chart-dragging"));
-  chart.getZr().on("mouseup", () => container.classList.remove("is-chart-dragging"));
-  chart.getZr().on("globalout", () => container.classList.remove("is-chart-dragging"));
+  chart.getZr().on("mousedown", () => {
+    draggingChart = true;
+    container.classList.add("is-chart-dragging");
+  });
+  chart.getZr().on("mousemove", () => {
+    if (!draggingChart || !currentData || currentData.kind !== "kline" || requestingHistory) {
+      return;
+    }
+
+    const range = getVisibleKlineWindow(chart, currentData.bars.length);
+    if (range.startIndex <= HISTORY_EDGE_WAIT_THRESHOLD) {
+      requestMoreHistory(true, 180);
+    }
+  });
+  chart.getZr().on("mousewheel", () => {
+    if (!currentData || currentData.kind !== "kline" || requestingHistory) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      if (!currentData || currentData.kind !== "kline" || requestingHistory) {
+        return;
+      }
+
+      const range = getVisibleKlineWindow(chart, currentData.bars.length);
+      const visibleCount = range.endIndex - range.startIndex + 1;
+      const prefetchBuffer = getHistoryPrefetchBuffer(visibleCount, slowHistoryRequestCount);
+      if (range.startIndex <= prefetchBuffer) {
+        const edgeWaiting = range.startIndex <= HISTORY_EDGE_WAIT_THRESHOLD;
+        requestMoreHistory(edgeWaiting, edgeWaiting || slowHistoryRequestCount > 0 ? 180 : 90);
+      }
+    }, 0);
+  });
+  chart.getZr().on("mouseup", () => {
+    draggingChart = false;
+    container.classList.remove("is-chart-dragging");
+  });
+  chart.getZr().on("globalout", () => {
+    draggingChart = false;
+    container.classList.remove("is-chart-dragging");
+  });
+  chart.getZr().on("dblclick", resetKlineWindow);
+  const clearDragging = () => {
+    draggingChart = false;
+    container.classList.remove("is-chart-dragging");
+  };
+  window.addEventListener("mouseup", clearDragging);
 
   return {
     update(data, period) {
       currentData = data;
       currentPeriod = period;
       chart.setOption(data.kind === "intraday" ? buildIntradayOption(data) : buildKlineOption(data, period), true);
+      lastHoverIndex = null;
       emitLatest();
     },
     prependHistory(data) {
@@ -87,29 +178,46 @@ export function createInteractiveMarketChart(
       }
 
       const oldLength = currentData.bars.length;
+      const visibleWindow = getVisibleKlineWindow(chart, oldLength);
+      const shouldContinueFromEdge = edgeWaitingForHistory || visibleWindow.startIndex <= HISTORY_EDGE_WAIT_THRESHOLD;
       const knownDates = new Set(currentData.bars.map((bar) => bar.date));
       const olderBars = data.bars.filter((bar) => !knownDates.has(bar.date));
       if (olderBars.length === 0) {
+        edgeWaitingForHistory = false;
         return;
       }
 
+      const elapsed = Date.now() - lastHistoryRequestAt;
+      slowHistoryRequestCount = elapsed > 800 ? Math.min(2, slowHistoryRequestCount + 1) : Math.max(0, slowHistoryRequestCount - 1);
       currentData = {
         ...currentData,
         bars: [...olderBars, ...currentData.bars]
       };
+      const nextWindow = shouldContinueFromEdge
+        ? getContinuedHistoryWindow(olderBars.length, visibleWindow)
+        : {
+            startValue: olderBars.length + visibleWindow.startIndex,
+            endValue: olderBars.length + visibleWindow.endIndex
+          };
       chart.setOption(buildKlineOption(currentData, currentPeriod), true);
       chart.dispatchAction({
         type: "dataZoom",
         dataZoomIndex: 0,
-        startValue: olderBars.length,
-        endValue: olderBars.length + oldLength - 1
+        startValue: nextWindow.startValue,
+        endValue: nextWindow.endValue
       });
-      emitLatest();
+      edgeWaitingForHistory = false;
+      if (lastHoverIndex !== null && lastHoverIndex < oldLength) {
+        emitHoverAt(lastHoverIndex + olderBars.length);
+      } else {
+        emitLatest();
+      }
     },
     resize() {
       chart.resize();
     },
     dispose() {
+      window.removeEventListener("mouseup", clearDragging);
       chart.dispose();
     }
   };
@@ -131,9 +239,9 @@ function buildIntradayOption(data: Extract<MarketChartData, { kind: "intraday" }
       show: true,
       showContent: false,
       trigger: "axis",
-      axisPointer: { type: "cross", label: { show: false } }
+      axisPointer: { type: "cross" }
     },
-    axisPointer: { label: { show: false }, link: [{ xAxisIndex: "all" }] },
+    axisPointer: { link: [{ xAxisIndex: "all" }] },
     grid: [
       { left: 48, right: 12, top: 18, height: "58%" },
       { left: 48, right: 12, top: "76%", height: "14%" }
@@ -145,6 +253,7 @@ function buildIntradayOption(data: Extract<MarketChartData, { kind: "intraday" }
     yAxis: [
       {
         scale: true,
+        axisPointer: buildPriceAxisPointer(),
         axisLabel: { color: MUTED_TEXT_COLOR },
         splitLine: { lineStyle: { color: "rgba(120, 120, 120, 0.18)" } }
       },
@@ -158,6 +267,7 @@ function buildIntradayOption(data: Extract<MarketChartData, { kind: "intraday" }
           margin: 4,
           formatter: (value: number) => formatAxisVolume(value)
         },
+        axisPointer: { label: { show: false } },
         splitLine: { show: false }
       }
     ],
@@ -214,9 +324,9 @@ function buildKlineOption(
       show: true,
       showContent: false,
       trigger: "axis",
-      axisPointer: { type: "cross", label: { show: false } }
+      axisPointer: { type: "cross" }
     },
-    axisPointer: { label: { show: false }, link: [{ xAxisIndex: "all" }] },
+    axisPointer: { link: [{ xAxisIndex: "all" }] },
     grid: [
       { left: 48, right: 12, top: 34, height: "52%" },
       { left: 48, right: 12, top: "74%", height: "14%" }
@@ -228,6 +338,7 @@ function buildKlineOption(
     yAxis: [
       {
         scale: true,
+        axisPointer: buildPriceAxisPointer(),
         axisLabel: { color: MUTED_TEXT_COLOR },
         splitLine: { lineStyle: { color: "rgba(120, 120, 120, 0.18)" } }
       },
@@ -241,6 +352,7 @@ function buildKlineOption(
           margin: 4,
           formatter: (value: number) => formatAxisVolume(value)
         },
+        axisPointer: { label: { show: false } },
         splitLine: { show: false }
       }
     ],
@@ -280,9 +392,24 @@ function buildCategoryAxis(data: string[], showLabel: boolean): echarts.XAXisCom
     axisTick: { show: false },
     axisLine: { lineStyle: { color: "rgba(120, 120, 120, 0.28)" } },
     axisLabel: { show: showLabel, color: MUTED_TEXT_COLOR },
+    axisPointer: { label: { show: false } },
     splitLine: { show: false },
     min: "dataMin",
     max: "dataMax"
+  };
+}
+
+function buildPriceAxisPointer(): echarts.YAXisComponentOption["axisPointer"] {
+  return {
+    label: {
+      show: true,
+      precision: 2,
+      backgroundColor: "#333333",
+      color: "#ffffff",
+      fontSize: 12,
+      fontWeight: 600,
+      padding: [3, 8]
+    }
   };
 }
 
@@ -295,7 +422,8 @@ function buildInsideDataZoom(dataLength: number): echarts.DataZoomComponentOptio
     endValue: Math.max(0, dataLength - 1),
     zoomOnMouseWheel: true,
     moveOnMouseMove: true,
-    preventDefaultMouseMove: true
+    preventDefaultMouseMove: true,
+    throttle: 80
   };
 }
 
@@ -349,10 +477,70 @@ function getPointCount(data: MarketChartData | null): number {
   return data.kind === "intraday" ? data.points.length : data.bars.length;
 }
 
-function getInsideDataZoomRange(chart: echarts.ECharts): number | null {
-  const option = chart.getOption() as { dataZoom?: Array<{ start?: number }> };
-  const start = option.dataZoom?.[0]?.start;
-  return typeof start === "number" ? start : null;
+function getVisibleKlineWindow(chart: echarts.ECharts, dataLength: number): { startIndex: number; endIndex: number } {
+  const option = chart.getOption() as {
+    dataZoom?: Array<{
+      start?: number;
+      end?: number;
+      startValue?: number | string;
+      endValue?: number | string;
+    }>;
+  };
+  const zoom = option.dataZoom?.[0];
+  if (!zoom || dataLength <= 0) {
+    return { startIndex: 0, endIndex: Math.max(0, dataLength - 1) };
+  }
+
+  const startFromValue = normalizeZoomIndex(zoom.startValue, dataLength);
+  const endFromValue = normalizeZoomIndex(zoom.endValue, dataLength);
+  if (startFromValue !== null && endFromValue !== null) {
+    return {
+      startIndex: Math.min(startFromValue, endFromValue),
+      endIndex: Math.max(startFromValue, endFromValue)
+    };
+  }
+
+  const startPercent = typeof zoom.start === "number" ? zoom.start : 0;
+  const endPercent = typeof zoom.end === "number" ? zoom.end : 100;
+  return {
+    startIndex: clampIndex(Math.floor((startPercent / 100) * (dataLength - 1)), dataLength),
+    endIndex: clampIndex(Math.ceil((endPercent / 100) * (dataLength - 1)), dataLength)
+  };
+}
+
+function normalizeZoomIndex(value: number | string | undefined, dataLength: number): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return clampIndex(Math.round(value), dataLength);
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const index = Number.parseInt(value, 10);
+    return Number.isFinite(index) ? clampIndex(index, dataLength) : null;
+  }
+  return null;
+}
+
+function clampIndex(value: number, dataLength: number): number {
+  return Math.max(0, Math.min(Math.max(0, dataLength - 1), value));
+}
+
+function getHistoryPrefetchBuffer(visibleCount: number, slowRequestCount: number): number {
+  if (slowRequestCount > 0 || visibleCount <= 24) {
+    return HISTORY_PREFETCH_FAST_BUFFER_COUNT;
+  }
+
+  return Math.max(HISTORY_PREFETCH_MIN_BUFFER_COUNT, Math.ceil(visibleCount * 0.55));
+}
+
+function getContinuedHistoryWindow(
+  addedCount: number,
+  previousWindow: { startIndex: number; endIndex: number }
+): { startValue: number; endValue: number } {
+  const visibleCount = Math.max(1, previousWindow.endIndex - previousWindow.startIndex + 1);
+  const startValue = Math.max(0, addedCount - Math.min(HISTORY_EDGE_CONTINUE_COUNT, Math.max(8, Math.floor(visibleCount * 0.5))));
+  return {
+    startValue,
+    endValue: startValue + visibleCount - 1
+  };
 }
 
 function getPeriodLabel(period: ChartPeriod): string {
